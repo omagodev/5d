@@ -12,6 +12,7 @@
     "pm2:logs": "pm2 logs starforge-5d"
   },
   "dependencies": {
+    "better-sqlite3": "^12.11.1",
     "ws": "^8.18.0"
   }
 }

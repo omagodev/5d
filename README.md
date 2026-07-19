@@ -25,3 +25,27 @@ pm2 startup
 
 Execute também o comando com `sudo` que o próprio `pm2 startup` imprimir e,
 em seguida, rode `pm2 save` novamente.
+
+## Multiplayer e ranking
+
+O servidor deve permanecer com `instances: 1` no PM2 porque as salas WebSocket
+ficam em memória. O ranking e o histórico das partidas são persistidos em:
+
+```text
+data/starforge.sqlite
+```
+
+O banco é criado automaticamente no primeiro início. A API expõe:
+
+```text
+GET  /api/ranking
+POST /api/matches
+```
+
+Depois de atualizar o projeto no servidor:
+
+```bash
+npm install --omit=dev
+pm2 restart starforge-5d --update-env
+pm2 save
+```

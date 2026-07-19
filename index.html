@@ -166,23 +166,10 @@
         background: linear-gradient(90deg, #8a5bff, #ff5bd7);
         box-shadow: 0 0 14px rgba(180, 108, 255, 0.5);
       }
-      #fuelFill {
-        background: linear-gradient(90deg, #ff5d6c, #ffd36b 58%, #8cffc2);
-        box-shadow: 0 0 16px rgba(255, 211, 107, 0.55);
-      }
-      #fuelFill.critical {
-        animation: fuelPulse 0.48s ease-in-out infinite alternate;
-      }
       .livesValue {
         color: #ff8a9a;
         letter-spacing: 0.12em;
         text-shadow: 0 0 14px rgba(255, 93, 108, 0.55);
-      }
-      @keyframes fuelPulse {
-        to {
-          filter: brightness(1.7);
-          box-shadow: 0 0 24px rgba(255, 83, 103, 0.95);
-        }
       }
       #stageFill,
       #bossFill {
@@ -552,6 +539,14 @@
         align-items: center;
         gap: 16px;
       }
+      #startScreen .panel {
+        max-height: 96vh;
+        overflow: auto;
+        padding-block: clamp(22px, 4vh, 42px);
+      }
+      #startScreen .nameRow { margin-top: 14px; }
+      #startScreen .actions, #startScreen .controls { margin-top: 18px; }
+      #rankScreen .panel { max-height: 94vh; overflow: auto; }
       .shipCard {
         display: grid;
         grid-template-columns: minmax(240px, 0.9fr) minmax(280px, 1.1fr);
@@ -899,6 +894,34 @@
       #mpStatus.connected { border-color: rgba(124,255,159,.4); color: #8cffc2; }
       #mpStatus.waiting { animation: mpPulse 1.6s ease-in-out infinite alternate; }
       @keyframes mpPulse { to { opacity: .5; } }
+      #matchPlayers {
+        position: fixed;
+        top: max(48px, calc(env(safe-area-inset-top) + 42px));
+        left: 50%;
+        transform: translateX(-50%);
+        min-width: 220px;
+        padding: 8px 10px;
+        border-radius: 14px;
+        background: rgba(6,12,28,.82);
+        border: 1px solid rgba(118,247,255,.18);
+        display: none;
+        z-index: 45;
+        pointer-events: none;
+      }
+      #matchPlayers.on { display: block; }
+      .matchPlayerRow {
+        display: grid;
+        grid-template-columns: 9px 1fr auto;
+        gap: 8px;
+        align-items: center;
+        padding: 4px 3px;
+        font-size: 11px;
+        font-weight: 900;
+        letter-spacing: .06em;
+      }
+      .matchPlayerRow .pilotDot { width: 7px; height: 7px; border-radius: 50%; background: #8cffc2; box-shadow: 0 0 8px #8cffc2; }
+      .matchPlayerRow.remote .pilotDot { background: var(--pink); box-shadow: 0 0 8px var(--pink); }
+      .matchPlayerRow .shipTag { color: #8499b5; font-size: 9px; }
       .lobbyInfo {
         text-align: center;
         margin-top: 20px;
@@ -1000,11 +1023,6 @@
             <div class="bar"><div id="xpFill" class="fill"></div></div>
             <span id="xpText" class="mini">0%</span>
           </div>
-          <div class="barrow">
-            <span class="mini">COMB.</span>
-            <div class="bar"><div id="fuelFill" class="fill"></div></div>
-            <span id="fuelText" class="mini">100%</span>
-          </div>
         </div>
         <div class="chip" id="specialChip" style="min-width: 170px">
           <div class="label">Especial · Shift / E</div>
@@ -1037,6 +1055,9 @@
           cada vez mais poderosa e enfrente entidades colossais em uma guerra
           que não termina.
         </p>
+        <div class="nameRow" style="justify-content:flex-start">
+          <input id="pilotName" maxlength="14" placeholder="Nome do piloto" autocomplete="nickname" />
+        </div>
         <div class="actions">
           <button id="startBtn">Iniciar missão</button>
           <button id="onlineBtn">Jogar Online</button>
@@ -1048,10 +1069,7 @@
           <div class="control">
             <b>Mira e disparo</b>Mouse + clique, Espaço ou disparo automático
           </div>
-          <div class="control">
-            <b>Combustível</b>Colete os núcleos deixados pelos inimigos ou a
-            nave explodirá
-          </div>
+          <div class="control"><b>Núcleos</b>Colete os núcleos para ganhar experiência e evoluir a nave</div>
           <div class="control"><b>3 vidas</b>Ao perder o casco, você retorna à batalha. A terceira queda encerra a missão.</div>
           <div class="control"><b>Celular</b>Analógico à esquerda, especial à direita e disparo automático</div>
           <div class="control"><b>Pausa</b>Esc, P ou botão dedicado na tela</div>
@@ -1074,7 +1092,7 @@
       <div class="panel">
         <div class="eyebrow">SISTEMA SUSPENSO</div>
         <h2 class="upgradeTitle">Pausado</h2>
-        <p class="upgradeSub">Respire. O vazio pode esperar.</p>
+        <p id="pauseSub" class="upgradeSub">Respire. O vazio pode esperar.</p>
         <div class="actions" style="justify-content: center">
           <button id="resumeBtn">Continuar</button>
           <button id="restartFromPauseBtn" class="secondary">Reiniciar</button>
@@ -1097,14 +1115,6 @@
           <div class="stat">
             <span class="label">Recorde</span><strong id="goBest">0</strong>
           </div>
-        </div>
-        <div id="saveScoreBox" class="nameRow">
-          <input
-            id="playerName"
-            maxlength="14"
-            placeholder="Seu nome de piloto"
-          />
-          <button id="saveScoreBtn" class="secondary">Salvar no ranking</button>
         </div>
         <div id="goRankList" class="rankList"></div>
         <div class="actions">
@@ -1131,6 +1141,8 @@
         <div class="eyebrow">HALL DA ETERNIDADE</div>
         <h2 class="upgradeTitle">Ranking</h2>
         <div id="rankList" class="rankList"></div>
+        <h3 style="margin:24px 0 8px">Últimas partidas</h3>
+        <div id="matchHistory" class="rankList" style="max-height:28vh;margin-top:0"></div>
         <div class="actions" style="justify-content: center">
           <button id="closeRankBtn" class="secondary">Voltar</button>
         </div>
@@ -1154,8 +1166,9 @@
     </div>
 
     <div id="mpStatus"></div>
+    <div id="matchPlayers"></div>
     <div id="remoteHpWrap">
-      <div class="label">ALIADO</div>
+      <div id="remoteHpName" class="label">ALIADO</div>
       <div class="barrow" style="margin-top:4px">
         <span class="mini">CASCO</span>
         <div class="bar"><div id="remoteHpFill" class="fill"></div></div>
@@ -1187,11 +1200,9 @@
           hpFill: document.getElementById("hpFill"),
           shieldFill: document.getElementById("shieldFill"),
           xpFill: document.getElementById("xpFill"),
-          fuelFill: document.getElementById("fuelFill"),
           hpText: document.getElementById("hpText"),
           shieldText: document.getElementById("shieldText"),
           xpText: document.getElementById("xpText"),
-          fuelText: document.getElementById("fuelText"),
           stageFill: document.getElementById("stageFill"),
           stageCount: document.getElementById("stageCount"),
           bossFill: document.getElementById("bossFill"),
@@ -1212,13 +1223,14 @@
           specialFill: document.getElementById("specialFill"),
           specialBtn: document.getElementById("specialBtn"),
           ragePips: document.getElementById("ragePips"),
-          saveBox: document.getElementById("saveScoreBox"),
-          playerName: document.getElementById("playerName"),
+          playerName: document.getElementById("pilotName"),
+          pauseSub: document.getElementById("pauseSub"),
           goRankList: document.getElementById("goRankList"),
           shipScreen: document.getElementById("shipScreen"),
           shipCards: document.getElementById("shipCards"),
           rankScreen: document.getElementById("rankScreen"),
           rankList: document.getElementById("rankList"),
+          matchHistory: document.getElementById("matchHistory"),
           mobileControls: document.getElementById("mobileControls"),
           joystick: document.getElementById("joystick"),
           joystickKnob: document.getElementById("joystickKnob"),
@@ -1260,6 +1272,7 @@
           flash: 0,
           sound: true,
           autoFire: true,
+          matchSubmitted: false,
           best: (() => {
             try {
               return +(localStorage.getItem("starforge_best") || 0);
@@ -1269,7 +1282,6 @@
           })(),
           combo: 1,
           comboTimer: 0,
-          fuelWarning: 0,
           lives: 3,
         };
 
@@ -1510,7 +1522,6 @@
               p.speed *= 0.85;
               p.damage *= 1.18;
               p.fireRate *= 0.85;
-              p.fuelDrain *= 0.9;
             },
           },
           {
@@ -1639,26 +1650,19 @@
         function shipById(id) {
           return SHIPS.find((x) => x.id === id) || SHIPS[0];
         }
-        function loadRank() {
-          try {
-            const list = JSON.parse(storage.get("starforge_rank", "[]"));
-            return Array.isArray(list) ? list : [];
-          } catch {
-            return [];
-          }
+        function getPilotName() {
+          const name = (ui.playerName.value.trim() || "PILOTO")
+            .replace(/[<>]/g, "")
+            .slice(0, 14)
+            .toUpperCase();
+          ui.playerName.value = name;
+          storage.set("starforge_name", name);
+          return name;
         }
-        function addRankEntry(name) {
-          const list = loadRank();
-          list.push({
-            n: name,
-            s: Math.floor(state.score),
-            st: state.stage,
-            sh: player.ship.id,
-          });
-          list.sort((a, b) => b.s - a.s);
-          const top = list.slice(0, 10);
-          storage.set("starforge_rank", JSON.stringify(top));
-          return top;
+        async function loadRank() {
+          const response = await fetch("/api/ranking", { cache: "no-store" });
+          if (!response.ok) throw new Error("Ranking indisponível");
+          return response.json();
         }
         function renderRank(el, list) {
           el.innerHTML = "";
@@ -1673,20 +1677,60 @@
             row.className = "rankRow" + (i === 0 ? " top" : "");
             row.innerHTML = `<span class="pos">${i + 1}º</span>
               <div><div class="who">${escapeHTML(r.n)}</div>
-              <div class="meta">${ship.icon} ${ship.name} · Fase ${r.st}</div></div>
+              <div class="meta">${ship.icon} ${ship.name} · Fase ${r.st} · ${r.kills || 0} abates · ${r.mode === "multiplayer" ? "Dupla" : "Solo"}</div></div>
               <span class="pts">${fmt(r.s)}</span>`;
             el.appendChild(row);
           });
         }
-        function saveScore() {
-          const name = (ui.playerName.value.trim() || "PILOTO")
-            .slice(0, 14)
-            .toUpperCase();
-          storage.set("starforge_name", name);
-          const list = addRankEntry(name);
-          ui.saveBox.style.display = "none";
-          renderRank(ui.goRankList, list);
-          showToast("Pontuação registrada no ranking");
+        function renderMatches(list) {
+          ui.matchHistory.innerHTML = "";
+          if (!list.length) {
+            ui.matchHistory.innerHTML = '<div class="rankRow"><span class="pos">—</span><div><div class="who">Nenhuma partida registrada</div></div><span class="pts"></span></div>';
+            return;
+          }
+          list.forEach((match) => {
+            const row = document.createElement("div");
+            row.className = "rankRow";
+            const participants = (match.players || [])
+              .map((participant) => `${escapeHTML(participant.name)} (${fmt(participant.score)})`)
+              .join(" + ");
+            row.innerHTML = `<span class="pos">#${match.id}</span><div><div class="who">${participants}</div><div class="meta">${match.mode === "multiplayer" ? "Dupla" : "Solo"} · Fase ${match.stage} · ${match.durationSeconds}s</div></div><span class="pts">${fmt(match.totalScore)}</span>`;
+            ui.matchHistory.appendChild(row);
+          });
+        }
+        async function refreshRank(el) {
+          try {
+            const data = await loadRank();
+            renderRank(el, data.ranking || []);
+            renderMatches(data.matches || []);
+          } catch {
+            el.innerHTML = '<div class="rankRow"><span class="pos">!</span><div><div class="who">Ranking indisponível</div><div class="meta">Conecte-se ao servidor para consultar o SQLite.</div></div><span class="pts"></span></div>';
+            ui.matchHistory.innerHTML = "";
+          }
+        }
+        async function submitSoloResult() {
+          if (state.matchSubmitted || !player) return;
+          state.matchSubmitted = true;
+          try {
+            const response = await fetch("/api/matches", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                name: getPilotName(),
+                shipId: player.ship.id,
+                score: Math.floor(state.score),
+                kills: state.kills,
+                stage: state.stage,
+                durationSeconds: Math.floor(state.time),
+              }),
+            });
+            if (!response.ok) throw new Error("Falha ao salvar");
+            showToast("Partida registrada no ranking");
+            await refreshRank(ui.goRankList);
+          } catch {
+            state.matchSubmitted = false;
+            showToast("Não foi possível registrar a partida");
+          }
         }
 
         /* ===================== SELEÇÃO DE NAVE ===================== */
@@ -2121,7 +2165,7 @@
           state.flash = 0;
           state.combo = 1;
           state.comboTimer = 0;
-          state.fuelWarning = 0;
+          state.matchSubmitted = false;
           state.lives = 3;
           input.joystickX = 0;
           input.joystickY = 0;
@@ -2165,10 +2209,6 @@
             nextXp: 38,
             level: 1,
             pickupRadius: 85,
-            fuel: 100,
-            maxFuel: 100,
-            fuelDrain: 3.0,
-            fuelGain: 1,
             invuln: 0,
             afterburn: 0,
             lifeSteal: 0,
@@ -2438,7 +2478,6 @@
               vy: Math.sin(ejectA) * ejectSpeed,
               r: e.boss ? 5 : 4,
               value: xpValue,
-              fuel: e.boss ? 11 : 5 + xpValue * 0.55,
               life: 13,
               collectDelay: 0.48,
               phase: Math.random() * TAU,
@@ -2450,10 +2489,6 @@
             boss = null;
             player.hp = Math.min(player.maxHp, player.hp + player.maxHp * 0.35);
             player.shield = player.maxShield;
-            player.fuel = Math.min(
-              player.maxFuel,
-              player.fuel + player.maxFuel * 0.22,
-            );
             spawnQueue.push({ t: 1.4, fn: () => openUpgrade(true) });
             spawnQueue.push({ t: 2.0, fn: nextStage });
           } else if (!state.bossActive && state.stage % 5 !== 0) {
@@ -2540,7 +2575,7 @@
         function loseLife(reason = "CASCO DESTRUÍDO") {
           if (state.gameOver) return false;
           state.lives--;
-          burst(player.x, player.y, reason === "COMBUSTÍVEL ESGOTADO" ? "#ffd36b" : "#ffffff", 80, 440, 6, 1.25);
+          burst(player.x, player.y, "#ffffff", 80, 440, 6, 1.25);
           shock(player.x, player.y, "#ff5bd7", 300, 0.8);
           audio.explode(true);
           state.shake = 24;
@@ -2555,11 +2590,9 @@
           player.vy = 0;
           player.hp = player.maxHp;
           player.shield = player.maxShield;
-          player.fuel = Math.max(player.fuel, player.maxFuel * 0.6);
           player.invuln = 3;
           player.shieldDelay = 0;
           state.combo = 1;
-          state.fuelWarning = player.fuel / player.maxFuel <= 0.25 ? 1 : 0;
           showBanner(`VIDA PERDIDA — ${state.lives} RESTANTE${state.lives === 1 ? "" : "S"}`);
           showToast("Sistemas restaurados · 3s de invulnerabilidade");
           updateUI();
@@ -2569,23 +2602,16 @@
         function endGame(reason = "CASCO DESTRUÍDO") {
           state.gameOver = true;
           state.running = false;
-          ui.goTitle.textContent =
-            reason === "COMBUSTÍVEL ESGOTADO"
-              ? "O reator apagou."
-              : "A forja apagou.";
-          ui.goSub.textContent =
-            reason === "COMBUSTÍVEL ESGOTADO"
-              ? "Sem núcleos coletados, as três vidas se esgotaram."
-              : "As três vidas foram consumidas, mas cada queda alimenta a próxima tentativa.";
+          ui.goTitle.textContent = "A forja apagou.";
+          ui.goSub.textContent = "As três vidas foram consumidas, mas cada queda alimenta a próxima tentativa.";
           shock(player.x, player.y, "#ff5bd7", 380, 1);
           state.best = Math.max(state.best, state.score);
           storage.set("starforge_best", state.best);
           ui.goStage.textContent = state.stage;
           ui.goScore.textContent = fmt(state.score);
           ui.goBest.textContent = fmt(state.best);
-          ui.saveBox.style.display = "flex";
-          ui.playerName.value = String(storage.get("starforge_name", ""));
-          renderRank(ui.goRankList, loadRank());
+          refreshRank(ui.goRankList);
+          if (!mp.active) submitSoloResult();
           ui.specialBtn.classList.remove("on");
           ui.mobileControls.classList.remove("on");
           setTimeout(() => ui.gameOver.classList.add("show"), 450);
@@ -2742,7 +2768,7 @@
           });
         }
 
-        function dropBossFuel(e, count = 2) {
+        function dropBossCores(e, count = 2) {
           for (let i = 0; i < count; i++) {
             pickups.push({
               x: e.x + rand(36, -36),
@@ -2750,15 +2776,14 @@
               vx: rand(210, -210),
               vy: rand(175, 55),
               r: 5,
-              value: 3,
-              fuel: 12 + state.stage * 0.12,
+              value: 8 + Math.floor(state.stage * 0.2),
               life: 12,
               collectDelay: 0.42,
               phase: Math.random() * TAU,
               bossDrop: true,
             });
           }
-          addText(e.x, e.y + e.r + 18, "CÉLULAS DE COMBUSTÍVEL", "#ffd36b", 12);
+          addText(e.x, e.y + e.r + 18, "NÚCLEOS DE XP", "#ffd36b", 12);
         }
 
         function bossSpiral(e, reverse = false) {
@@ -3050,31 +3075,6 @@
             },
           },
           {
-            id: "fuelTank",
-            icon: "◐",
-            name: "Reservatório de Matéria",
-            desc: "+25 de combustível máximo, reabastece e reduz o consumo em 8%.",
-            max: 6,
-            apply() {
-              player.maxFuel += 25;
-              player.fuel = player.maxFuel;
-              player.fuelDrain *= 0.92;
-              player.engineTier++;
-            },
-          },
-          {
-            id: "fuelCatalyst",
-            icon: "✺",
-            name: "Catalisador de Coleta",
-            desc: "Núcleos recuperam +28% de combustível e são atraídos de mais longe.",
-            max: 5,
-            apply() {
-              player.fuelGain *= 1.28;
-              player.pickupRadius += 24;
-              player.magnet += 0.22;
-            },
-          },
-          {
             id: "overdrive",
             icon: "☄",
             name: "Sobrecarga Integral",
@@ -3198,29 +3198,6 @@
           }
         }
 
-        function updateFuel(dt) {
-          const stagePressure = 1 + Math.min(0.62, (state.stage - 1) * 0.026);
-          player.fuel -= player.fuelDrain * stagePressure * dt;
-          const ratio = player.fuel / player.maxFuel;
-          if (ratio > 0.36) state.fuelWarning = 0;
-          if (ratio <= 0.25 && state.fuelWarning < 1) {
-            state.fuelWarning = 1;
-            showToast("COMBUSTÍVEL BAIXO — COLETE NÚCLEOS");
-            audio.tone(145, 0.22, "square", 0.08, -35);
-          }
-          if (ratio <= 0.1 && state.fuelWarning < 2) {
-            state.fuelWarning = 2;
-            showBanner("REATOR EM COLAPSO");
-            audio.tone(90, 0.4, "sawtooth", 0.12, -45);
-          }
-          if (player.fuel <= 0) {
-            player.fuel = 0;
-            loseLife("COMBUSTÍVEL ESGOTADO");
-            return false;
-          }
-          return true;
-        }
-
         function update(dt) {
           if (
             !state.running ||
@@ -3235,12 +3212,6 @@
           state.comboTimer -= dt;
           if (state.comboTimer <= 0)
             state.combo = lerp(state.combo, 1, dt * 2.5);
-          if (!updateFuel(dt)) {
-            updateParticles(dt);
-            updateUI();
-            return;
-          }
-
           for (const q of spawnQueue) q.t -= dt;
           const ready = spawnQueue.filter((q) => q.t <= 0);
           spawnQueue = spawnQueue.filter((q) => q.t > 0);
@@ -3546,9 +3517,9 @@
                 (1 + (e.rageLevel - 1) * 0.35);
             }
             if (e.patternTimer <= 0) attackBossPattern(e);
-            // Células aparecem perto do chefe, forçando aproximação deliberada.
+            // Núcleos aparecem perto do chefe, premiando aproximação deliberada.
             if (e.supplyTimer <= 0) {
-              dropBossFuel(e, 2 + (e.hp / e.maxHp < 0.4 ? 1 : 0));
+              dropBossCores(e, 2 + (e.hp / e.maxHp < 0.4 ? 1 : 0));
               e.supplyTimer = Math.max(4.1, 6.2 - state.stage * 0.018);
             }
             if (e.kind === 1 && e.dash <= 0) {
@@ -3719,17 +3690,14 @@
             dy = player.y - p.y;
             d = Math.hypot(dx, dy) || 1;
 
-            // Todo núcleo fornece XP e combustível; ignorá-lo agora tem custo real.
+            // Todo núcleo fornece experiência para a evolução da nave.
             if (p.collectDelay <= 0 && d < player.r + p.r + 13) {
               p.life = 0;
-              const gainedFuel = (p.fuel || 5) * player.fuelGain;
-              player.fuel = Math.min(player.maxFuel, player.fuel + gainedFuel);
-              if (player.fuel / player.maxFuel > 0.36) state.fuelWarning = 0;
               gainXP(p.value);
               addText(
                 player.x,
                 player.y - 24,
-                "+" + Math.round(gainedFuel) + " COMB.",
+                "+" + Math.round(p.value) + " XP",
                 "#ffd36b",
                 11,
               );
@@ -3772,14 +3740,10 @@
             (player.maxShield ? (100 * player.shield) / player.maxShield : 0) +
             "%";
           ui.xpFill.style.width = (100 * player.xp) / player.nextXp + "%";
-          const fuelPct = clamp((100 * player.fuel) / player.maxFuel, 0, 100);
-          ui.fuelFill.style.width = fuelPct + "%";
-          ui.fuelFill.classList.toggle("critical", fuelPct <= 25);
           ui.hpText.textContent = Math.max(0, Math.ceil(player.hp));
           ui.shieldText.textContent = Math.ceil(player.shield);
           ui.xpText.textContent =
             Math.floor((100 * player.xp) / player.nextXp) + "%";
-          ui.fuelText.textContent = Math.ceil(fuelPct) + "%";
           ui.stageFill.style.width =
             (100 * state.stageKills) / state.targetKills + "%";
           ui.stageCount.textContent =
@@ -4045,6 +4009,7 @@
             ctx.stroke();
             ctx.restore();
           }
+          drawPilotLabel(p.x, p.y - 36, mp.active ? mp.localName : (ui.playerName.value || "PILOTO"), p.ship.color);
 
           for (let i = 0; i < player.drones; i++) {
             const d = dronePosition(i);
@@ -4397,10 +4362,38 @@
 
         function togglePause(force) {
           if (!state.running || state.gameOver || state.choosing) return;
-          state.paused = force !== undefined ? force : !state.paused;
-          ui.pause.classList.toggle("show", state.paused);
-          ui.mobilePauseBtn.textContent = state.paused ? "▶" : "Ⅱ";
-          ui.mobilePauseBtn.setAttribute("aria-label", state.paused ? "Continuar jogo" : "Pausar jogo");
+          const nextPaused = force !== undefined ? force : !state.paused;
+          if (mp.active && mp.connected) {
+            net.send({ type: "game:pause", paused: nextPaused });
+          } else {
+            applyPause(nextPaused, getPilotName());
+          }
+        }
+
+        function drawPilotLabel(x, y, name, color) {
+          ctx.save();
+          ctx.font = "900 10px system-ui";
+          ctx.textAlign = "center";
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = "rgba(2,4,12,.9)";
+          ctx.fillStyle = color;
+          ctx.shadowBlur = 8;
+          ctx.shadowColor = color;
+          ctx.strokeText(String(name || "PILOTO").slice(0, 14), x, y);
+          ctx.fillText(String(name || "PILOTO").slice(0, 14), x, y);
+          ctx.restore();
+        }
+
+        function applyPause(paused, by = "PILOTO") {
+          state.paused = paused;
+          ui.pause.classList.toggle("show", paused);
+          ui.pauseSub.textContent = paused
+            ? `${by} pausou a partida. A pausa vale para todos.`
+            : "Respire. O vazio pode esperar.";
+          ui.mobilePauseBtn.textContent = paused ? "▶" : "Ⅱ";
+          ui.mobilePauseBtn.setAttribute("aria-label", paused ? "Continuar jogo" : "Pausar jogo");
+          document.getElementById("restartFromPauseBtn").style.display =
+            mp.active ? "none" : "inline-block";
         }
 
         function moveJoystick(e) {
@@ -4447,8 +4440,10 @@
             !e.repeat
           )
             activateSpecial();
-          if (e.code === "Enter" && ui.start.classList.contains("show"))
+          if (e.code === "Enter" && ui.start.classList.contains("show")) {
+            getPilotName();
             openShipSelect();
+          }
         });
         window.addEventListener("keyup", (e) => input.keys.delete(e.code));
 
@@ -4508,10 +4503,11 @@
 
         document.getElementById("startBtn").addEventListener("click", () => {
           audio.init();
+          getPilotName();
           openShipSelect();
         });
-        document.getElementById("rankBtn").addEventListener("click", () => {
-          renderRank(ui.rankList, loadRank());
+        document.getElementById("rankBtn").addEventListener("click", async () => {
+          await refreshRank(ui.rankList);
           ui.rankScreen.classList.add("show");
         });
         document
@@ -4525,13 +4521,8 @@
             ui.gameOver.classList.remove("show");
             openShipSelect();
           });
-        document
-          .getElementById("saveScoreBtn")
-          .addEventListener("click", saveScore);
-        ui.playerName.addEventListener("keydown", (e) => {
-          e.stopPropagation();
-          if (e.key === "Enter") saveScore();
-        });
+        ui.playerName.addEventListener("change", getPilotName);
+        ui.playerName.addEventListener("keydown", (e) => e.stopPropagation());
         ui.specialBtn.addEventListener("pointerdown", (e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -4560,10 +4551,13 @@
           remoteHpWrap: document.getElementById("remoteHpWrap"),
           remoteHpFill: document.getElementById("remoteHpFill"),
           remoteHpText: document.getElementById("remoteHpText"),
+          remoteHpName: document.getElementById("remoteHpName"),
+          matchPlayers: document.getElementById("matchPlayers"),
         };
         const mp = {
           active: false, ws: null, playerId: 0, slot: 0,
           remotePlayer: null, remoteShipId: "vanguarda",
+          remoteName: "ALIADO", localName: "PILOTO", players: [],
           sendTimer: 0, enemyIdMap: new Map(), connected: false,
         };
         function mpSetStatus(text, cls) {
@@ -4573,6 +4567,24 @@
         function mpClearStatus() {
           mpUI.mpStatus.className = "";
           mpUI.mpStatus.textContent = "";
+        }
+        function renderMatchPlayers(players = mp.players) {
+          mp.players = players;
+          mpUI.matchPlayers.innerHTML = players.map((entry) => {
+            const ship = shipById(entry.shipId);
+            const remote = entry.id !== mp.playerId;
+            return `<div class="matchPlayerRow ${remote ? "remote" : "self"}"><i class="pilotDot"></i><span>${escapeHTML(entry.name || "PILOTO")}</span><span class="shipTag">${ship.icon} ${ship.name}</span></div>`;
+          }).join("");
+          mpUI.matchPlayers.classList.toggle("on", mp.active || players.length > 0);
+          const remote = players.find((entry) => entry.id !== mp.playerId);
+          const local = players.find((entry) => entry.id === mp.playerId);
+          if (local) mp.localName = local.name;
+          if (remote) {
+            mp.remoteName = remote.name;
+            mp.remoteShipId = remote.shipId;
+            mpUI.remoteHpName.textContent = remote.name;
+            if (mp.remotePlayer) mp.remotePlayer.name = remote.name;
+          }
         }
 
         class NetClient {
@@ -4585,8 +4597,9 @@
             mpSetStatus("CONECTANDO...", "waiting");
             this.ws.onopen = () => {
               mp.connected = true;
+              mp.localName = getPilotName();
               mpSetStatus("CONECTADO", "connected");
-              this.send({ type: "join", shipId: selectedShip.id });
+              this.send({ type: "join", shipId: selectedShip.id, name: mp.localName });
             };
             this.ws.onmessage = (evt) => {
               let msg;
@@ -4597,6 +4610,7 @@
               mp.connected = false; mp.active = false;
               mpClearStatus();
               mpUI.remoteHpWrap.classList.remove("on");
+              mpUI.matchPlayers.classList.remove("on");
               if (mpUI.lobby.classList.contains("show")) {
                 mpUI.lobby.classList.remove("show");
                 ui.start.classList.add("show");
@@ -4614,18 +4628,21 @@
             if (this.ws) { this.send({ type: "leave" }); this.ws.close(); this.ws = null; mp.ws = null; }
             mp.connected = false; mp.active = false;
             mpClearStatus(); mpUI.remoteHpWrap.classList.remove("on");
+            mpUI.matchPlayers.classList.remove("on");
           }
           onMessage(msg) {
             switch (msg.type) {
               case "room:joined":
-                mp.playerId = msg.playerId; mp.slot = msg.slot; break;
+                mp.playerId = msg.playerId; mp.slot = msg.slot;
+                renderMatchPlayers(msg.players || []); break;
+              case "room:players":
+                renderMatchPlayers(msg.players || []); break;
               case "room:waiting":
                 mpSetStatus("AGUARDANDO JOGADOR...", "waiting"); break;
               case "room:full": {
                 mpSetStatus("JOGADOR ENCONTRADO!", "connected");
                 mpUI.lobby.classList.remove("show");
-                const ri = msg.players.find(p => p.id !== mp.playerId);
-                if (ri) mp.remoteShipId = ri.shipId;
+                renderMatchPlayers(msg.players || []);
                 break;
               }
               case "game:start": {
@@ -4635,6 +4652,7 @@
                   angle: -Math.PI / 2, tangle: -Math.PI / 2,
                   vx: 0, vy: 0, hp: 100, maxHp: 100,
                   alive: true, invuln: 0, shipId: mp.remoteShipId,
+                  name: mp.remoteName,
                   ship: shipById(mp.remoteShipId),
                   afterburn: 0, weaponTier: 0, engineTier: 0, armorTier: 0,
                   special: { active: 0 }, shield: 0, maxShield: 0,
@@ -4643,6 +4661,7 @@
                 mpSetStatus("MULTIPLAYER ATIVO", "connected");
                 const myS = msg.players.find(p => p.id === mp.playerId);
                 if (myS) selectedShip = shipById(myS.shipId);
+                renderMatchPlayers(msg.players || []);
                 resetGame();
                 break;
               }
@@ -4743,10 +4762,16 @@
                 break;
               case "game:over":
                 if (!state.gameOver) endGame("AMBOS PILOTOS DESTRUÍDOS");
+                setTimeout(() => refreshRank(ui.goRankList), 250);
+                break;
+              case "game:pause":
+                applyPause(Boolean(msg.paused), msg.by || "PILOTO");
+                if (msg.paused) showToast(`${msg.by || "PILOTO"} PAUSOU PARA TODOS`);
                 break;
               case "player:left":
                 if (mp.remotePlayer) mp.remotePlayer.alive = false;
                 mpUI.remoteHpWrap.classList.remove("on");
+                renderMatchPlayers(mp.players.filter((entry) => entry.id !== msg.playerId));
                 showToast("ALIADO DESCONECTOU — MODO SOLO");
                 mpSetStatus("ALIADO DESCONECTOU", "");
                 setTimeout(() => { if (mp.active) mpSetStatus("MODO SOLO", "connected"); }, 3000);
@@ -4776,6 +4801,7 @@
             invuln: player.invuln, afterburn: player.afterburn,
             weaponTier: player.weaponTier, engineTier: player.engineTier,
             armorTier: player.armorTier, shield: player.shield, maxShield: player.maxShield,
+            score: Math.floor(state.score), kills: state.kills, stage: state.stage,
             special: player.special ? { active: player.special.active } : null,
           }});
         }
@@ -4820,8 +4846,13 @@
         loseLife = function(reason) {
           const result = _origLoseLife(reason);
           if (mp.active && mp.connected) {
-            net.send({ type: "player:died", livesLeft: state.lives, reason });
-            if (state.lives <= 0) net.send({ type: "player:gameover" });
+            const finalStats = {
+              score: Math.floor(state.score),
+              kills: state.kills,
+              stage: state.stage,
+            };
+            net.send({ type: "player:died", livesLeft: state.lives, reason, ...finalStats });
+            if (state.lives <= 0) net.send({ type: "player:gameover", ...finalStats });
           }
           return result;
         };
@@ -4867,9 +4898,7 @@
             ctx.strokeStyle = "#ff5bd7"; ctx.lineWidth = 2;
             ctx.beginPath(); ctx.arc(r.x, r.y, 24 + Math.sin(state.time * 3) * 1.5, 0, TAU); ctx.stroke(); ctx.restore();
           }
-          ctx.save(); ctx.globalAlpha = 0.7; ctx.fillStyle = "#ff5bd7";
-          ctx.font = "800 9px system-ui"; ctx.textAlign = "center";
-          ctx.fillText("ALIADO", r.x, r.y - 34); ctx.restore();
+          drawPilotLabel(r.x, r.y - 36, r.name || mp.remoteName, "#ff5bd7");
         }
 
         const _baseLoop = loop;
@@ -4889,6 +4918,7 @@
 
         document.getElementById("onlineBtn").addEventListener("click", () => {
           audio.init();
+          getPilotName();
           ui.start.classList.remove("show");
           mpUI.lobby.classList.add("show");
           net.connect();
@@ -4899,6 +4929,7 @@
           ui.start.classList.add("show");
         });
 
+        ui.playerName.value = String(storage.get("starforge_name", "PILOTO"));
         resize();
         requestAnimationFrame(loop);
       })();

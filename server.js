@@ -3,7 +3,7 @@
  *
  * Relay + authoritative enemy spawns for 2-player co-op.
  * Run: node server.js
- * Default port: 3000 (env PORT overrides)
+ * Default port: 4050 (env PORT overrides)
  */
 
 "use strict";
@@ -12,8 +12,94 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { WebSocketServer } = require("ws");
+const {
+  databasePath,
+  recordMatch,
+  getRanking,
+  getRecentMatches,
+  closeDatabase,
+} = require("./database");
 
 const PORT = parseInt(process.env.PORT, 10) || 4050;
+
+const clampInteger = (value, min, max) =>
+  Math.max(min, Math.min(max, Math.floor(Number(value) || 0)));
+const cleanName = (value) =>
+  String(value || "PILOTO")
+    .replace(/[\u0000-\u001f<>]/g, "")
+    .trim()
+    .slice(0, 14)
+    .toUpperCase() || "PILOTO";
+const cleanShipId = (value) =>
+  ["vanguarda", "colosso", "espectro", "tempestade"].includes(value)
+    ? value
+    : "vanguarda";
+
+function normalizedResult(data = {}) {
+  return {
+    score: clampInteger(data.score, 0, 1_000_000_000),
+    kills: clampInteger(data.kills, 0, 10_000_000),
+    stage: clampInteger(data.stage || 1, 1, 1_000_000),
+  };
+}
+
+function sendJson(res, status, payload) {
+  const body = JSON.stringify(payload);
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Content-Length": Buffer.byteLength(body),
+    "Cache-Control": "no-store",
+  });
+  res.end(body);
+}
+
+function handleApi(req, res, urlPath) {
+  if (req.method === "GET" && urlPath === "/api/ranking") {
+    sendJson(res, 200, {
+      ranking: getRanking(50),
+      matches: getRecentMatches(10),
+    });
+    return true;
+  }
+
+  if (req.method === "POST" && urlPath === "/api/matches") {
+    let raw = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => {
+      raw += chunk;
+      if (raw.length > 32_768) req.destroy();
+    });
+    req.on("end", () => {
+      try {
+        const body = JSON.parse(raw || "{}");
+        const result = normalizedResult(body);
+        const endedAt = new Date();
+        const durationSeconds = clampInteger(body.durationSeconds, 0, 86_400);
+        const matchId = recordMatch({
+          roomId: null,
+          mode: "solo",
+          startedAt: new Date(endedAt.getTime() - durationSeconds * 1000).toISOString(),
+          endedAt: endedAt.toISOString(),
+          stage: result.stage,
+          durationSeconds,
+          players: [{
+            playerId: null,
+            name: cleanName(body.name),
+            shipId: cleanShipId(body.shipId),
+            ...result,
+          }],
+        });
+        sendJson(res, 201, { ok: true, matchId });
+      } catch (error) {
+        console.error("[db] Falha ao registrar partida solo:", error.message);
+        sendJson(res, 400, { ok: false, error: "Partida inválida" });
+      }
+    });
+    return true;
+  }
+
+  return false;
+}
 
 /* ======================== STATIC FILE SERVER ======================== */
 
@@ -31,6 +117,7 @@ const MIME = {
 
 const httpServer = http.createServer((req, res) => {
   let urlPath = req.url.split("?")[0];
+  if (handleApi(req, res, urlPath)) return;
   if (urlPath === "/") urlPath = "/index.html";
 
   const filePath = path.join(__dirname, urlPath);
@@ -84,8 +171,12 @@ class PlayerSession {
     /** @type {Room|null} */
     this.room = null;
     this.shipId = "vanguarda";
+    this.name = "PILOTO";
     this.alive = true;
     this.lastState = null;
+    this.score = 0;
+    this.kills = 0;
+    this.stage = 1;
   }
   send(msg) {
     if (this.ws.readyState === 1) {
@@ -104,12 +195,24 @@ class Room {
     this.targetKills = 12;
     this.bossActive = false;
     this.running = false;
+    this.paused = false;
     this.spawnTimer = 0.35;
     this.stageClearTimer = 0;
     this.time = 0;
     this.enemies = new Map(); // id -> enemy state
     this.tickInterval = null;
     this.lastTick = Date.now();
+    this.startedAt = new Date();
+    this.recorded = false;
+  }
+
+  playersPayload() {
+    return this.players.map((player) => ({
+      id: player.id,
+      name: player.name,
+      shipId: player.shipId,
+      alive: player.alive,
+    }));
   }
 
   broadcast(msg, exclude = null) {
@@ -131,7 +234,9 @@ class Room {
       playerId: session.id,
       slot,
       playerCount: this.players.length,
+      players: this.playersPayload(),
     });
+    this.broadcast({ type: "room:players", players: this.playersPayload() });
   }
 
   removePlayer(session) {
@@ -145,6 +250,17 @@ class Room {
         type: "player:left",
         playerId: session.id,
       });
+      this.broadcast({ type: "room:players", players: this.playersPayload() });
+      if (this.paused) {
+        this.paused = false;
+        this.lastTick = Date.now();
+        this.broadcast({
+          type: "game:pause",
+          paused: false,
+          by: "SISTEMA",
+          playerId: 0,
+        });
+      }
       // If game was running and only 1 player left, they continue solo
     }
   }
@@ -152,6 +268,9 @@ class Room {
   start() {
     if (this.running) return;
     this.running = true;
+    this.paused = false;
+    this.recorded = false;
+    this.startedAt = new Date();
     this.stage = 1;
     this.stageKills = 0;
     this.targetKills = 12;
@@ -165,13 +284,13 @@ class Room {
     // Notify all players to start
     for (let i = 0; i < this.players.length; i++) {
       this.players[i].alive = true;
+      this.players[i].score = 0;
+      this.players[i].kills = 0;
+      this.players[i].stage = 1;
       this.players[i].send({
         type: "game:start",
         slot: i,
-        players: this.players.map((p) => ({
-          id: p.id,
-          shipId: p.shipId,
-        })),
+        players: this.playersPayload(),
         stage: this.stage,
         seed: Math.floor(Math.random() * 999999),
       });
@@ -183,6 +302,7 @@ class Room {
 
   stop() {
     this.running = false;
+    this.paused = false;
     if (this.tickInterval) {
       clearInterval(this.tickInterval);
       this.tickInterval = null;
@@ -194,6 +314,7 @@ class Room {
     const dt = Math.min(0.1, (now - this.lastTick) / 1000);
     this.lastTick = now;
     if (!this.running) return;
+    if (this.paused) return;
 
     this.time += dt;
 
@@ -382,10 +503,36 @@ class Room {
 
   checkGameOver() {
     const allDead = this.players.every((p) => !p.alive);
-    if (allDead) {
-      this.broadcast({ type: "game:over" });
+    if (allDead && !this.recorded) {
+      const matchId = this.recordResult();
+      this.broadcast({ type: "game:over", matchId });
       this.stop();
     }
+  }
+
+  recordResult() {
+    if (this.recorded) return null;
+    this.recorded = true;
+    const endedAt = new Date();
+    const stage = Math.max(this.stage, ...this.players.map((p) => p.stage));
+    const matchId = recordMatch({
+      roomId: this.id,
+      mode: "multiplayer",
+      startedAt: this.startedAt.toISOString(),
+      endedAt: endedAt.toISOString(),
+      stage,
+      durationSeconds: Math.max(0, Math.floor(this.time)),
+      players: this.players.map((player) => ({
+        playerId: player.id,
+        name: player.name,
+        shipId: player.shipId,
+        score: player.score,
+        kills: player.kills,
+        stage: player.stage,
+      })),
+    });
+    console.log(`[db] Partida multiplayer ${this.id} salva como #${matchId}`);
+    return matchId;
   }
 }
 
@@ -451,7 +598,8 @@ function handleMessage(session, msg) {
   switch (msg.type) {
     case "join": {
       // Player wants to join multiplayer
-      session.shipId = msg.shipId || "vanguarda";
+      session.shipId = cleanShipId(msg.shipId);
+      session.name = cleanName(msg.name);
 
       if (waitingRoom && waitingRoom.players.length === 1) {
         // Join existing room
@@ -462,10 +610,7 @@ function handleMessage(session, msg) {
         room.broadcast({
           type: "room:full",
           playerCount: 2,
-          players: room.players.map((p) => ({
-            id: p.id,
-            shipId: p.shipId,
-          })),
+          players: room.playersPayload(),
         });
         setTimeout(() => room.start(), 1500);
       } else {
@@ -486,6 +631,10 @@ function handleMessage(session, msg) {
       // Player state update — relay to other player
       if (!session.room) return;
       session.lastState = msg.data;
+      const result = normalizedResult(msg.data);
+      session.score = result.score;
+      session.kills = result.kills;
+      session.stage = result.stage;
       session.room.broadcast(
         {
           type: "remote:state",
@@ -548,6 +697,7 @@ function handleMessage(session, msg) {
 
     case "player:died": {
       if (!session.room) return;
+      Object.assign(session, normalizedResult(msg));
       session.alive = msg.livesLeft > 0;
       session.room.broadcast(
         {
@@ -565,6 +715,7 @@ function handleMessage(session, msg) {
 
     case "player:gameover": {
       if (!session.room) return;
+      Object.assign(session, normalizedResult(msg));
       session.alive = false;
       session.room.broadcast(
         {
@@ -574,6 +725,19 @@ function handleMessage(session, msg) {
         session,
       );
       session.room.checkGameOver();
+      break;
+    }
+
+    case "game:pause": {
+      if (!session.room || !session.room.running) return;
+      session.room.paused = Boolean(msg.paused);
+      session.room.lastTick = Date.now();
+      session.room.broadcast({
+        type: "game:pause",
+        paused: session.room.paused,
+        by: session.name,
+        playerId: session.id,
+      });
       break;
     }
 
@@ -588,7 +752,7 @@ function handleMessage(session, msg) {
     }
 
     case "ship:selected": {
-      session.shipId = msg.shipId || "vanguarda";
+      session.shipId = cleanShipId(msg.shipId);
       if (session.room) {
         session.room.broadcast(
           {
@@ -598,6 +762,10 @@ function handleMessage(session, msg) {
           },
           session,
         );
+        session.room.broadcast({
+          type: "room:players",
+          players: session.room.playersPayload(),
+        });
       }
       break;
     }
@@ -611,6 +779,7 @@ httpServer.listen(PORT, () => {
   console.log(`  ║  STARFORGE: Eternal Assault — Server Online  ║`);
   console.log(`  ║  http://localhost:${PORT}                      ║`);
   console.log(`  ╚══════════════════════════════════════════════╝\n`);
+  console.log(`  SQLite: ${databasePath}\n`);
 });
 
 let shuttingDown = false;
@@ -623,6 +792,7 @@ function shutdown(signal) {
   for (const client of wss.clients) client.close(1001, "Servidor reiniciando");
 
   httpServer.close(() => {
+    closeDatabase();
     console.log("[server] Encerramento concluído.");
     process.exit(0);
   });
