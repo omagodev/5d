@@ -563,7 +563,7 @@ class Room {
           });
         }
         this.enemies.clear();
-        this.broadcast({ type: "stage:clear" });
+        this.broadcast({ type: "stage:clear", stage: this.stage });
       }
     }
   }
@@ -798,6 +798,8 @@ function handleMessage(session, msg) {
       const room = session.room;
       if (!room || !room.running || room.worldAuthorityId !== session.id) return;
       if (!msg.data || typeof msg.data !== "object") return;
+      if (room.stageClearTimer > 0 || room.intermission) return;
+      if (Number(msg.data.scene?.[0]) !== room.stage) return;
       room.broadcast(
         { type: "world:state", data: msg.data, serverTime: Date.now() },
         session,
@@ -808,6 +810,7 @@ function handleMessage(session, msg) {
     case "world:events": {
       const room = session.room;
       if (!room || !room.running || room.worldAuthorityId !== session.id) return;
+      if (room.stageClearTimer > 0 || room.intermission) return;
       if (!Array.isArray(msg.bullets) || msg.bullets.length > 900) return;
       room.broadcast(
         { type: "world:events", bullets: msg.bullets, ref: msg.ref, serverTime: Date.now() },

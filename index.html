@@ -2682,7 +2682,8 @@
               !state.stageClearTimer
             ) {
               state.stageClearTimer = 2;
-              enemies.forEach((o) => {
+              if (mp.active) clearWaveRemainders();
+              else enemies.forEach((o) => {
                 if (!o.boss) o.dead = true;
               });
               showBanner("SETOR LIMPO");
@@ -4719,7 +4720,7 @@
         }
 
         function leaveToStart() {
-          for (const timer of mp.spawnTimers) clearTimeout(timer);
+          for (const timer of mp.spawnTimers.values()) clearTimeout(timer);
           mp.spawnTimers.clear();
           if (mp.connected) net.disconnect();
           cancelAnimationFrame(shipPreviewFrame);
@@ -4933,7 +4934,7 @@
           pings: new Map(), worldTimer: 0, worldInterval: 1 / 7,
           localEnemySeq: -1, pendingEnemyBullets: [],
           localBulletSeq: -1,
-          spawnTimers: new Set(),
+          spawnTimers: new Map(),
         };
         function mpSetStatus(text, cls) {
           mpUI.mpStatus.textContent = text;
@@ -5022,9 +5023,14 @@
 
         function scheduleNetworkEnemy(msg) {
           const en = msg.enemy;
-          if (!en || mp.enemyIdMap.has(en.id)) return;
+          if (!en || mp.enemyIdMap.has(en.id) || mp.spawnTimers.has(en.id)) return;
           const spawn = () => {
-            if (!mp.active || mp.enemyIdMap.has(en.id)) return;
+            if (
+              !mp.active ||
+              mp.enemyIdMap.has(en.id) ||
+              state.stageClearTimer > 0 ||
+              Number(msg.stage || state.stage) !== state.stage
+            ) return;
             const ex = (en.x / 1920) * W;
             const ey = (en.y / 1080) * H;
             if (en.type === "boss") {
@@ -5046,10 +5052,29 @@
           const estimatedServerNow = Date.now() + mp.clockOffset;
           const delay = Math.max(0, Number(msg.spawnAt || estimatedServerNow) - estimatedServerNow);
           const timer = setTimeout(() => {
-            mp.spawnTimers.delete(timer);
+            mp.spawnTimers.delete(en.id);
             spawn();
           }, delay);
-          mp.spawnTimers.add(timer);
+          mp.spawnTimers.set(en.id, timer);
+        }
+
+        function cancelNetworkSpawn(enemyId) {
+          const timer = mp.spawnTimers.get(enemyId);
+          if (timer !== undefined) clearTimeout(timer);
+          mp.spawnTimers.delete(enemyId);
+        }
+
+        function clearWaveRemainders() {
+          for (const timer of mp.spawnTimers.values()) clearTimeout(timer);
+          mp.spawnTimers.clear();
+          enemies.forEach((enemy) => {
+            if (!enemy.boss) enemy.dead = true;
+          });
+          for (const [id, enemy] of mp.enemyIdMap) {
+            if (!enemy.boss) mp.enemyIdMap.delete(id);
+          }
+          enemyBullets = [];
+          mp.pendingEnemyBullets = [];
         }
 
         class NetClient {
@@ -5143,7 +5168,7 @@
               }
               case "game:start": {
                 mp.active = true; mp.slot = msg.slot;
-                for (const timer of mp.spawnTimers) clearTimeout(timer);
+                for (const timer of mp.spawnTimers.values()) clearTimeout(timer);
                 mp.spawnTimers.clear();
                 mp.remoteScore = 0; mp.remoteKills = 0;
                 mp.worldTimer = 0; mp.localEnemySeq = -1; mp.localBulletSeq = -1;
@@ -5285,6 +5310,7 @@
                 break;
               }
               case "enemy:killed": {
+                cancelNetworkSpawn(msg.enemyId);
                 const ke = mp.enemyIdMap.get(msg.enemyId);
                 if (ke && !ke.dead) {
                   const localStats = { score: state.score, kills: state.kills, combo: state.combo };
@@ -5305,9 +5331,10 @@
                 mpSetStatus("MULTIPLAYER ATIVO", "connected");
                 break;
               case "stage:clear":
+                if (msg.stage && Number(msg.stage) !== state.stage) break;
                 if (!state.stageClearTimer) {
                   state.stageClearTimer = 2;
-                  enemies.forEach(o => { if (!o.boss) o.dead = true; });
+                  clearWaveRemainders();
                   showBanner("SETOR LIMPO");
                 }
                 break;
