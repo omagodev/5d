@@ -36,6 +36,8 @@ const cleanShipId = (value) =>
   ["vanguarda", "colosso", "espectro", "tempestade"].includes(value)
     ? value
     : "vanguarda";
+const cleanLabel = (value, fallback = "MELHORIA") =>
+  String(value || fallback).replace(/[\u0000-\u001f<>]/g, "").trim().slice(0, 48) || fallback;
 
 function normalizedResult(data = {}) {
   return {
@@ -182,6 +184,7 @@ const httpServer = http.createServer((req, res) => {
 const wss = new WebSocketServer({
   server: httpServer,
   perMessageDeflate: { threshold: 256 },
+  maxPayload: 256 * 1024,
 });
 
 /* ---- helpers ---- */
@@ -214,6 +217,7 @@ class PlayerSession {
     this.score = 0;
     this.kills = 0;
     this.stage = 1;
+    this.ping = 0;
   }
   send(msg) {
     if (this.ws.readyState === 1) {
@@ -245,6 +249,7 @@ class Room {
     this.bossUpgradeOpen = false;
     this.bossControllerId = null;
     this.bossReady = new Set();
+    this.worldAuthorityId = null;
   }
 
   playersPayload() {
@@ -255,21 +260,36 @@ class Room {
       alive: player.alive,
       ready: player.ready,
       isHost: index === 0,
+      isWorldAuthority: player.id === this.worldAuthorityId,
       score: player.score,
       kills: player.kills,
       stage: player.stage,
+      ping: player.ping,
     }));
   }
 
   broadcast(msg, exclude = null) {
     const data = JSON.stringify(msg);
-    const ephemeral = msg.type === "remote:state";
+    const ephemeral = msg.type === "remote:state" || msg.type === "world:state";
     for (const p of this.players) {
       if (p !== exclude && p.ws.readyState === 1) {
         if (ephemeral && p.ws.bufferedAmount > 32_768) continue;
         p.ws.send(data);
       }
     }
+  }
+
+  refreshWorldAuthority(force = false) {
+    const candidates = this.players.filter((player) => player.alive);
+    if (!candidates.length) return;
+    const latency = (player) => player.ping > 0 ? player.ping : 9999;
+    const best = [...candidates].sort((a, b) => latency(a) - latency(b) || a.id - b.id)[0];
+    const current = candidates.find((player) => player.id === this.worldAuthorityId);
+    const selected = !force && current && latency(current) <= latency(best) + 80 ? current : best;
+    if (selected.id === this.worldAuthorityId) return;
+    this.worldAuthorityId = selected.id;
+    this.broadcast({ type: "world:authority", playerId: selected.id });
+    this.broadcast({ type: "room:players", players: this.playersPayload() });
   }
 
   addPlayer(session) {
@@ -294,6 +314,7 @@ class Room {
       this.stop();
       rooms.delete(this.id);
     } else {
+      if (this.running) this.refreshWorldAuthority(session.id === this.worldAuthorityId);
       this.broadcast({
         type: "player:left",
         playerId: session.id,
@@ -355,6 +376,8 @@ class Room {
       player.kills = 0;
       player.stage = 1;
     }
+    this.worldAuthorityId = null;
+    this.refreshWorldAuthority(true);
     const players = this.playersPayload();
 
     // Notify all players to start with the same synchronized snapshot.
@@ -365,6 +388,7 @@ class Room {
         players,
         stage: this.stage,
         seed: Math.floor(Math.random() * 999999),
+        serverTime: Date.now(),
       });
     }
 
@@ -455,6 +479,7 @@ class Room {
           type: "enemy:spawn",
           enemy: enemyData,
           stage: this.stage,
+          spawnAt: Date.now() + 180,
         });
       }
 
@@ -478,15 +503,13 @@ class Room {
       };
       this.enemies.set(bossId, bossData);
 
-      // Delay boss spawn slightly
-      setTimeout(() => {
-        this.broadcast({
-          type: "enemy:spawn",
-          enemy: bossData,
-          stage: this.stage,
-          isBoss: true,
-        });
-      }, 2400);
+      this.broadcast({
+        type: "enemy:spawn",
+        enemy: bossData,
+        stage: this.stage,
+        isBoss: true,
+        spawnAt: Date.now() + 2400,
+      });
     }
   }
 
@@ -608,16 +631,13 @@ class Room {
       };
       this.enemies.set(bossId, bossData);
 
-      setTimeout(() => {
-        if (this.running) {
-          this.broadcast({
-            type: "enemy:spawn",
-            enemy: bossData,
-            stage: this.stage,
-            isBoss: true,
-          });
-        }
-      }, 2400);
+      this.broadcast({
+        type: "enemy:spawn",
+        enemy: bossData,
+        stage: this.stage,
+        isBoss: true,
+        spawnAt: Date.now() + 2400,
+      });
     }
 
     this.broadcast({
@@ -774,6 +794,67 @@ function handleMessage(session, msg) {
       break;
     }
 
+    case "world:state": {
+      const room = session.room;
+      if (!room || !room.running || room.worldAuthorityId !== session.id) return;
+      if (!msg.data || typeof msg.data !== "object") return;
+      room.broadcast(
+        { type: "world:state", data: msg.data, serverTime: Date.now() },
+        session,
+      );
+      break;
+    }
+
+    case "world:events": {
+      const room = session.room;
+      if (!room || !room.running || room.worldAuthorityId !== session.id) return;
+      if (!Array.isArray(msg.bullets) || msg.bullets.length > 900) return;
+      room.broadcast(
+        { type: "world:events", bullets: msg.bullets, ref: msg.ref, serverTime: Date.now() },
+        session,
+      );
+      break;
+    }
+
+    case "player:upgrade": {
+      if (!session.room || !session.room.running || !session.alive) return;
+      session.room.broadcast(
+        {
+          type: "player:upgrade",
+          playerId: session.id,
+          playerName: session.name,
+          upgradeId: cleanLabel(msg.upgradeId, "upgrade"),
+          upgradeName: cleanLabel(msg.upgradeName),
+          level: clampInteger(msg.level, 1, 9999),
+          build: msg.build && typeof msg.build === "object" ? msg.build : {},
+        },
+        session,
+      );
+      break;
+    }
+
+    case "latency:ping": {
+      session.send({
+        type: "latency:pong",
+        clientTime: Number(msg.clientTime) || 0,
+        serverTime: Date.now(),
+      });
+      break;
+    }
+
+    case "latency:update": {
+      session.ping = clampInteger(msg.ping, 0, 9999);
+      if (session.room) {
+        session.room.broadcast({
+          type: "room:latency",
+          playerId: session.id,
+          ping: session.ping,
+        });
+        if (session.room.running) session.room.refreshWorldAuthority(false);
+      }
+      break;
+    }
+
     case "fire": {
       // Player fired — relay
       if (!session.room || !session.room.running || !session.alive) return;
@@ -782,6 +863,7 @@ function handleMessage(session, msg) {
           type: "remote:fire",
           playerId: session.id,
           data: msg.data,
+          serverTime: Date.now(),
         },
         session,
       );
@@ -837,6 +919,7 @@ function handleMessage(session, msg) {
         session,
       );
       if (!session.alive) {
+        session.room.refreshWorldAuthority(true);
         session.room.checkGameOver();
       }
       session.room.broadcast({
@@ -850,6 +933,7 @@ function handleMessage(session, msg) {
       if (!session.room) return;
       Object.assign(session, normalizedResult(msg));
       session.alive = false;
+      session.room.refreshWorldAuthority(true);
       session.room.broadcast(
         {
           type: "remote:gameover",

@@ -38,6 +38,12 @@ chefe, a passagem de setor mostra os dados da equipe e aguarda as melhorias dos
 pilotos sobreviventes antes de avançar. O servidor comprime os arquivos e reduz
 a frequência de estados WebSocket automaticamente em conexões lentas.
 
+O placar também mostra o ping de cada piloto. Upgrades geram alertas para a
+equipe e seus efeitos visuais, incluindo drones, são replicados. Um cliente
+com menor latência sincroniza snapshots compactos do cenário, inimigos, chefe e
+projéteis hostis; a autoridade migra automaticamente se a conexão piorar ou o
+piloto for eliminado, e o servidor rejeita snapshots do cliente incorreto.
+
 O servidor deve permanecer com `instances: 1` no PM2 porque as salas WebSocket
 ficam em memória. O ranking e o histórico das partidas são persistidos em:
 

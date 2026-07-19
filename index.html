@@ -950,7 +950,7 @@
       #matchPlayers.on { display: block; }
       .matchPlayerRow {
         display: grid;
-        grid-template-columns: 9px 1fr auto auto;
+        grid-template-columns: 9px 1fr auto auto auto;
         gap: 8px;
         align-items: center;
         padding: 4px 3px;
@@ -962,6 +962,9 @@
       .matchPlayerRow.remote .pilotDot { background: var(--pink); box-shadow: 0 0 8px var(--pink); }
       .matchPlayerRow .shipTag { color: #8499b5; font-size: 9px; }
       .matchPlayerRow .liveScore { color: #dffcff; font-variant-numeric: tabular-nums; }
+      .matchPlayerRow .ping { color: #8cffc2; font-size: 9px; font-variant-numeric: tabular-nums; }
+      .matchPlayerRow .ping.medium { color: var(--gold); }
+      .matchPlayerRow .ping.slow { color: var(--danger); }
       .matchPlayerRow.leader { color: var(--gold); }
       .matchPlayerRow.leader .liveScore::before { content: "♛ "; }
       #matchLead {
@@ -2952,7 +2955,7 @@
           opts = {},
         ) {
           if (enemyBullets.length > 850) return;
-          enemyBullets.push({
+          const bullet = {
             x,
             y,
             vx: Math.cos(a) * speed,
@@ -2970,7 +2973,21 @@
             waveSpeed: opts.waveSpeed || 0,
             baseAngle: a,
             baseSpeed: speed,
-          });
+          };
+          if (mp.active && mp.isAuthority) bullet._netId = mp.localBulletSeq--;
+          enemyBullets.push(bullet);
+          if (mp.active && mp.isAuthority) {
+            mp.pendingEnemyBullets.push([
+              bullet._netId, Math.round(bullet.x), Math.round(bullet.y),
+              Math.round(bullet.vx), Math.round(bullet.vy),
+              bullet.r, Math.round(bullet.damage * 10) / 10,
+              Math.round(bullet.life * 10) / 10, bullet.color,
+              Math.round(bullet.phase * 1000) / 1000,
+              bullet.homing, bullet.homingTime, bullet.accel,
+              bullet.wave, bullet.waveSpeed,
+              Math.round(bullet.baseAngle * 1000) / 1000, Math.round(bullet.baseSpeed),
+            ]);
+          }
         }
 
         function dropBossCores(e, count = 2) {
@@ -3373,10 +3390,29 @@
               state.pendingBossAdvance = false;
               upgradeLevels[u.id] = (upgradeLevels[u.id] || 0) + 1;
               u.apply();
+              if (mp.active && mp.connected) {
+                net.send({
+                  type: "player:upgrade",
+                  upgradeId: u.id,
+                  upgradeName: u.name,
+                  level: upgradeLevels[u.id],
+                  build: {
+                    drones: player.drones,
+                    weaponTier: player.weaponTier,
+                    engineTier: player.engineTier,
+                    armorTier: player.armorTier,
+                    size: Math.round(player.size * 100) / 100,
+                    maxHp: Math.ceil(player.maxHp),
+                    maxShield: Math.ceil(player.maxShield),
+                  },
+                });
+              }
               state.choosing = false;
               ui.upgrades.classList.remove("show");
               audio.upgrade();
-              showToast(u.name);
+              showToast(mp.active
+                ? `${mp.localName} melhorou: ${u.name} Nv.${upgradeLevels[u.id]}`
+                : u.name);
               shock(player.x, player.y, "#76f7ff", 150, 0.55);
               burst(player.x, player.y, "#b46cff", 32, 260, 4, 0.8);
               updateUI();
@@ -3573,6 +3609,25 @@
         }
 
         function updateEnemies(dt) {
+          if (mp.active && !mp.isAuthority) {
+            const blend = 1 - Math.pow(0.00008, dt);
+            for (const enemy of enemies) {
+              if (enemy.dead) continue;
+              enemy.t += dt;
+              enemy.age = (enemy.age || 0) + dt;
+              enemy.flash = Math.max(0, enemy.flash - dt);
+              enemy.shieldFlash = Math.max(0, (enemy.shieldFlash || 0) - dt);
+              if (Number.isFinite(enemy._syncX)) enemy.x = lerp(enemy.x, enemy._syncX, blend);
+              if (Number.isFinite(enemy._syncY)) enemy.y = lerp(enemy.y, enemy._syncY, blend);
+              if (Number.isFinite(enemy._syncRot)) enemy.rot = lerpAngle(enemy.rot || 0, enemy._syncRot, blend);
+              const rr = enemy.r + player.r * .75;
+              if ((enemy.x - player.x) ** 2 + (enemy.y - player.y) ** 2 < rr * rr) {
+                damagePlayer((enemy.boss ? 35 : enemy.type === "tank" ? 24 : 13) + state.stage * .5);
+              }
+            }
+            enemies = enemies.filter((enemy) => !enemy.dead);
+            return;
+          }
           for (const e of enemies) {
             if (e.dead) continue;
             e.t += dt;
@@ -4664,6 +4719,8 @@
         }
 
         function leaveToStart() {
+          for (const timer of mp.spawnTimers) clearTimeout(timer);
+          mp.spawnTimers.clear();
           if (mp.connected) net.disconnect();
           cancelAnimationFrame(shipPreviewFrame);
           state.running = false;
@@ -4872,6 +4929,11 @@
           bossControllerId: 0, remoteScore: 0, remoteKills: 0,
           netInterval: 1 / 12,
           applyingRemoteEvent: false,
+          isAuthority: false, ownPing: 0, clockOffset: 0,
+          pings: new Map(), worldTimer: 0, worldInterval: 1 / 7,
+          localEnemySeq: -1, pendingEnemyBullets: [],
+          localBulletSeq: -1,
+          spawnTimers: new Set(),
         };
         function mpSetStatus(text, cls) {
           mpUI.mpStatus.textContent = text;
@@ -4886,7 +4948,13 @@
           mpUI.matchPlayers.classList.toggle("on", mp.active || players.length > 0);
           const remote = players.find((entry) => entry.id !== mp.playerId);
           const local = players.find((entry) => entry.id === mp.playerId);
-          if (local) mp.localName = local.name;
+          for (const entry of players) {
+            if (Number.isFinite(Number(entry.ping))) mp.pings.set(entry.id, Number(entry.ping));
+          }
+          if (local) {
+            mp.localName = local.name;
+            if (mp.active) mp.isAuthority = Boolean(local.isWorldAuthority);
+          }
           if (remote) {
             mp.remoteName = remote.name;
             mp.remoteShipId = remote.shipId;
@@ -4918,7 +4986,9 @@
           mpUI.matchPlayers.innerHTML = entries.map((entry) => {
             const ship = shipById(entry.shipId);
             const leader = mp.active && !tied && best?.id === entry.id;
-            return `<div class="matchPlayerRow ${entry.remote ? "remote" : "self"} ${leader ? "leader" : ""}"><i class="pilotDot"></i><span>${escapeHTML(entry.name || "PILOTO")}</span><span class="shipTag">${ship.icon} ${ship.name}</span><span class="liveScore">${fmt(entry.score)}</span></div>`;
+            const ping = Math.max(0, Math.round(mp.pings.get(entry.id) || entry.ping || 0));
+            const pingClass = ping >= 220 ? "slow" : ping >= 110 ? "medium" : "";
+            return `<div class="matchPlayerRow ${entry.remote ? "remote" : "self"} ${leader ? "leader" : ""}"><i class="pilotDot"></i><span>${escapeHTML(entry.name || "PILOTO")}</span><span class="shipTag">${ship.icon} ${ship.name}</span><span class="liveScore">${fmt(entry.score)}</span><span class="ping ${pingClass}">${ping ? `${ping}ms` : "--"}</span></div>`;
           }).join("") + (mp.active
             ? `<div id="matchLead">${tied ? "DISPUTA EMPATADA" : `${escapeHTML(best?.name || "PILOTO")} ESTÁ NA FRENTE`}</div>`
             : "");
@@ -4950,8 +5020,43 @@
           if (selectButton && mp.localReady) selectButton.textContent = "PRONTO ✓";
         }
 
+        function scheduleNetworkEnemy(msg) {
+          const en = msg.enemy;
+          if (!en || mp.enemyIdMap.has(en.id)) return;
+          const spawn = () => {
+            if (!mp.active || mp.enemyIdMap.has(en.id)) return;
+            const ex = (en.x / 1920) * W;
+            const ey = (en.y / 1080) * H;
+            if (en.type === "boss") {
+              spawnBoss();
+              if (boss) {
+                boss.kind = en.kind ?? boss.kind;
+                boss._netId = en.id;
+                mp.enemyIdMap.set(en.id, boss);
+              }
+            } else {
+              spawnEnemy(en.type, ex, ey, en.scale || 1);
+              const created = enemies[enemies.length - 1];
+              if (created) {
+                created._netId = en.id;
+                mp.enemyIdMap.set(en.id, created);
+              }
+            }
+          };
+          const estimatedServerNow = Date.now() + mp.clockOffset;
+          const delay = Math.max(0, Number(msg.spawnAt || estimatedServerNow) - estimatedServerNow);
+          const timer = setTimeout(() => {
+            mp.spawnTimers.delete(timer);
+            spawn();
+          }, delay);
+          mp.spawnTimers.add(timer);
+        }
+
         class NetClient {
-          constructor() { this.ws = null; }
+          constructor() { this.ws = null; this.pingInterval = null; }
+          measurePing() {
+            this.send({ type: "latency:ping", clientTime: Date.now() });
+          }
           connect() {
             const protocol = location.protocol === "https:" ? "wss:" : "ws:";
             const url = protocol + "//" + location.host;
@@ -4967,6 +5072,9 @@
               mp.localName = getPilotName();
               mpSetStatus("CONECTADO", "connected");
               this.send({ type: "join", shipId: selectedShip.id, name: mp.localName });
+              this.measurePing();
+              clearInterval(this.pingInterval);
+              this.pingInterval = setInterval(() => this.measurePing(), 3000);
             };
             this.ws.onmessage = (evt) => {
               let msg;
@@ -4974,6 +5082,8 @@
               this.onMessage(msg);
             };
             this.ws.onclose = () => {
+              clearInterval(this.pingInterval);
+              this.pingInterval = null;
               mp.connected = false; mp.active = false;
               mpClearStatus();
               mpUI.remoteHpWrap.classList.remove("on");
@@ -4995,6 +5105,8 @@
             if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(msg));
           }
           disconnect() {
+            clearInterval(this.pingInterval);
+            this.pingInterval = null;
             if (this.ws) { this.send({ type: "leave" }); this.ws.close(); this.ws = null; mp.ws = null; }
             mp.connected = false; mp.active = false;
             mpClearStatus(); mpUI.remoteHpWrap.classList.remove("on");
@@ -5002,6 +5114,20 @@
           }
           onMessage(msg) {
             switch (msg.type) {
+              case "latency:pong": {
+                const now = Date.now();
+                const sent = Number(msg.clientTime) || now;
+                mp.ownPing = Math.max(0, Math.round(now - sent));
+                mp.clockOffset = (Number(msg.serverTime) || now) - (sent + mp.ownPing / 2);
+                mp.pings.set(mp.playerId, mp.ownPing);
+                this.send({ type: "latency:update", ping: mp.ownPing });
+                renderLiveScoreboard();
+                break;
+              }
+              case "room:latency":
+                mp.pings.set(msg.playerId, Math.max(0, Number(msg.ping) || 0));
+                renderLiveScoreboard();
+                break;
               case "room:joined":
                 mp.playerId = msg.playerId; mp.slot = msg.slot;
                 renderMatchPlayers(msg.players || []); break;
@@ -5017,7 +5143,11 @@
               }
               case "game:start": {
                 mp.active = true; mp.slot = msg.slot;
+                for (const timer of mp.spawnTimers) clearTimeout(timer);
+                mp.spawnTimers.clear();
                 mp.remoteScore = 0; mp.remoteKills = 0;
+                mp.worldTimer = 0; mp.localEnemySeq = -1; mp.localBulletSeq = -1;
+                mp.pendingEnemyBullets = [];
                 mp.inHangar = false;
                 cancelAnimationFrame(shipPreviewFrame);
                 ui.shipScreen.classList.remove("show");
@@ -5029,13 +5159,18 @@
                   alive: true, invuln: 0, shipId: mp.remoteShipId,
                   name: mp.remoteName,
                   ship: shipById(mp.remoteShipId),
-                  afterburn: 0, weaponTier: 0, engineTier: 0, armorTier: 0,
+                   afterburn: 0, weaponTier: 0, engineTier: 0, armorTier: 0,
+                  drones: 0, size: 1,
                   special: { active: 0 }, shield: 0, maxShield: 0,
                 };
                 mpUI.remoteHpWrap.classList.add("on");
                 mpSetStatus("MULTIPLAYER ATIVO", "connected");
                 const myS = msg.players.find(p => p.id === mp.playerId);
-                if (myS) selectedShip = shipById(myS.shipId);
+                if (myS) {
+                  selectedShip = shipById(myS.shipId);
+                  mp.isAuthority = Boolean(myS.isWorldAuthority);
+                }
+                if (msg.serverTime) mp.clockOffset = Number(msg.serverTime) - Date.now();
                 renderMatchPlayers(msg.players || []);
                 resetGame();
                 break;
@@ -5056,6 +5191,8 @@
                 mp.remotePlayer.weaponTier = d.weaponTier || 0;
                 mp.remotePlayer.engineTier = d.engineTier || 0;
                 mp.remotePlayer.armorTier = d.armorTier || 0;
+                mp.remotePlayer.drones = d.drones || 0;
+                mp.remotePlayer.size = d.size || 1;
                 mp.remotePlayer.shield = d.shield || 0;
                 mp.remotePlayer.maxShield = d.maxShield || 0;
                 mp.remoteScore = Math.max(0, Number(d.score) || 0);
@@ -5067,16 +5204,40 @@
                 renderLiveScoreboard();
                 break;
               }
+              case "world:state":
+                applyWorldState(msg.data);
+                break;
+              case "world:authority": {
+                const becomingAuthority = msg.playerId === mp.playerId;
+                mp.isAuthority = becomingAuthority;
+                mp.worldTimer = 0;
+                mp.pendingEnemyBullets = [];
+                if (becomingAuthority) {
+                  const enemyIds = enemies.map((enemy) => Number(enemy._netId)).filter((id) => id < 0);
+                  const bulletIds = enemyBullets.map((bullet) => Number(bullet._netId)).filter((id) => id < 0);
+                  mp.localEnemySeq = Math.min(-1, ...enemyIds) - 1;
+                  mp.localBulletSeq = Math.min(-1, ...bulletIds) - 1;
+                  showToast("Sincronização do mundo transferida para você");
+                }
+                break;
+              }
+              case "world:events":
+                applyWorldBulletEvents(msg.bullets, msg.serverTime, msg.ref);
+                break;
               case "remote:fire": {
                 if (!mp.remotePlayer || !mp.remotePlayer.alive) break;
                 const fd = msg.data;
                 const rx = (fd.x / fd.refW) * W, ry = (fd.y / fd.refH) * H;
+                const lag = clamp(((Date.now() + mp.clockOffset) - Number(msg.serverTime || Date.now())) / 1000, 0, 1.2);
                 for (const b of fd.bullets) {
+                  const bvx = Math.cos(b.angle) * b.speed;
+                  const bvy = Math.sin(b.angle) * b.speed;
                   bullets.push({
-                    x: rx + Math.cos(b.angle) * 20, y: ry + Math.sin(b.angle) * 20,
-                    vx: Math.cos(b.angle) * b.speed, vy: Math.sin(b.angle) * b.speed,
+                    x: rx + Math.cos(b.angle) * 20 + bvx * lag,
+                    y: ry + Math.sin(b.angle) * 20 + bvy * lag,
+                    vx: bvx, vy: bvy,
                     r: b.isMissile ? 5 : 3.2, damage: b.damage,
-                    life: b.isMissile ? 2.8 : 1.7, pierce: b.pierce || 0,
+                    life: Math.max(.1, (b.isMissile ? 2.8 : 1.7) - lag), pierce: b.pierce || 0,
                     crit: b.crit, isMissile: b.isMissile, homing: b.homing || 0,
                     color: b.crit ? "#ffd36b" : b.isMissile ? "#ff6ebd" : "#ff5bd7",
                     trail: 0, remote: true,
@@ -5093,18 +5254,19 @@
                 burst(sx, sy, rs.color, 30, 320, 4, 0.8);
                 break;
               }
+              case "player:upgrade": {
+                if (msg.playerId !== mp.playerId && mp.remotePlayer) {
+                  const build = msg.build || {};
+                  for (const key of ["drones", "weaponTier", "engineTier", "armorTier", "size", "maxHp", "maxShield"]) {
+                    if (Number.isFinite(Number(build[key]))) mp.remotePlayer[key] = Number(build[key]);
+                  }
+                }
+                showToast(`${msg.playerName || "PILOTO"} melhorou: ${msg.upgradeName || "MELHORIA"} Nv.${msg.level || 1}`);
+                break;
+              }
               case "enemy:spawn": {
                 if (!state.running) break;
-                const en = msg.enemy;
-                const ex = (en.x / 1920) * W, ey = (en.y / 1080) * H;
-                if (en.type === "boss") {
-                  spawnBoss();
-                  if (boss) { mp.enemyIdMap.set(en.id, boss); boss._netId = en.id; }
-                } else {
-                  spawnEnemy(en.type, ex, ey, en.scale || 1);
-                  const last = enemies[enemies.length - 1];
-                  if (last) { mp.enemyIdMap.set(en.id, last); last._netId = en.id; }
-                }
+                scheduleNetworkEnemy(msg);
                 break;
               }
               case "enemy:damage": {
@@ -5219,6 +5381,138 @@
         }
         const net = new NetClient();
 
+        function mpSendWorld(dt) {
+          if (!mp.active || !mp.connected || !mp.isAuthority || !state.running) return;
+          mp.worldTimer -= dt;
+          if (mp.worldTimer > 0) return;
+          const slow = Math.max(mp.ownPing, ...mp.pings.values()) >= 220 || net.ws?.bufferedAmount > 16_384;
+          mp.worldTimer = slow ? 1 / 4 : mp.worldInterval;
+
+          if (mp.pendingEnemyBullets.length) {
+            net.send({ type: "world:events", ref: [W, H], bullets: mp.pendingEnemyBullets.splice(0, 900) });
+          }
+
+          const enemyState = enemies.filter((enemy) => !enemy.dead).map((enemy) => {
+            if (enemy._netId === undefined) {
+              enemy._netId = mp.localEnemySeq--;
+              mp.enemyIdMap.set(enemy._netId, enemy);
+            }
+            return [
+              enemy._netId, enemy.boss ? "boss" : enemy.type, enemy.kind ?? -1,
+              Math.round(enemy.x), Math.round(enemy.y),
+              Math.round(enemy.vx || 0), Math.round(enemy.vy || 0),
+              Math.ceil(enemy.hp || 0), Math.ceil(enemy.maxHp || 0),
+              Math.ceil(enemy.shield || 0), Math.ceil(enemy.maxShield || 0),
+              Math.round((enemy.rot || 0) * 1000) / 1000,
+              Math.round((enemy.scale || 1) * 100) / 100,
+              enemy.rageLevel || 0,
+            ];
+          });
+          const hostileBulletState = enemyBullets.filter((bullet) => bullet.life > 0).map((bullet) => {
+            if (bullet._netId === undefined) bullet._netId = mp.localBulletSeq--;
+            return [
+              bullet._netId, Math.round(bullet.x), Math.round(bullet.y),
+              Math.round(bullet.vx), Math.round(bullet.vy),
+              Math.round(bullet.life * 10) / 10,
+              Math.round((bullet.phase || 0) * 1000) / 1000,
+              Math.round((bullet.age || 0) * 10) / 10,
+            ];
+          });
+          net.send({
+            type: "world:state",
+            data: {
+              scene: [state.stage, state.stageKills, state.targetKills, state.bossActive ? 1 : 0, parallax.index],
+              ref: [W, H],
+              enemies: enemyState,
+              bullets: hostileBulletState,
+            },
+          });
+        }
+
+        function applyWorldState(data) {
+          if (!mp.active || mp.isAuthority || !data) return;
+          const scene = data.scene || [];
+          const sx = W / Math.max(1, Number(data.ref?.[0]) || W);
+          const sy = H / Math.max(1, Number(data.ref?.[1]) || H);
+          if (Number(scene[0]) > 0) {
+            const remoteStage = Number(scene[0]);
+            if (remoteStage !== state.stage) {
+              state.stage = remoteStage;
+            }
+            const remoteBiome = Number(scene[4] ?? remoteStage - 1);
+            if (remoteBiome !== parallax.index) setBiome(remoteBiome, true);
+            state.stageKills = Number(scene[1]) || 0;
+            state.targetKills = Number(scene[2]) || state.targetKills;
+            state.bossActive = Boolean(scene[3]);
+          }
+
+          const present = new Set();
+          for (const row of data.enemies || []) {
+            const id = row[0];
+            present.add(id);
+            let enemy = mp.enemyIdMap.get(id);
+            if (!enemy || enemy.dead) {
+              if (row[1] === "boss") {
+                if (!boss || boss.dead) spawnBoss();
+                enemy = boss;
+                if (enemy) enemy.kind = row[2] >= 0 ? row[2] : enemy.kind;
+              } else {
+                spawnEnemy(row[1], row[3] * sx, row[4] * sy, row[12] || 1);
+                enemy = enemies[enemies.length - 1];
+              }
+              if (!enemy) continue;
+              enemy._netId = id;
+              mp.enemyIdMap.set(id, enemy);
+            }
+            enemy._syncX = row[3] * sx; enemy._syncY = row[4] * sy;
+            enemy.vx = row[5] * sx; enemy.vy = row[6] * sy;
+            enemy.hp = row[7]; enemy.maxHp = row[8];
+            enemy.shield = row[9]; enemy.maxShield = row[10];
+            enemy._syncRot = row[11]; enemy.scale = row[12] || 1;
+            if (enemy.boss) enemy.rageLevel = row[13] || enemy.rageLevel;
+          }
+          for (const [id, enemy] of mp.enemyIdMap) {
+            if (!present.has(id) && !enemy.dead) {
+              enemy.dead = true;
+              if (enemy === boss) boss = null;
+              mp.enemyIdMap.delete(id);
+            }
+          }
+
+          const bulletRows = data.bullets || [];
+          const bulletById = new Map(enemyBullets.filter((bullet) => bullet._netId !== undefined).map((bullet) => [bullet._netId, bullet]));
+          const presentBullets = new Set();
+          for (const row of bulletRows) {
+            presentBullets.add(row[0]);
+            const bullet = bulletById.get(row[0]);
+            if (!bullet) continue;
+            bullet.x = lerp(bullet.x, row[1] * sx, .72);
+            bullet.y = lerp(bullet.y, row[2] * sy, .72);
+            bullet.vx = row[3] * sx; bullet.vy = row[4] * sy;
+            bullet.life = row[5]; bullet.phase = row[6]; bullet.age = row[7];
+          }
+          enemyBullets = enemyBullets.filter(
+            (bullet) => bullet._netId === undefined || presentBullets.has(bullet._netId),
+          );
+        }
+
+        function applyWorldBulletEvents(rows, serverTime, ref) {
+          if (!mp.active || mp.isAuthority) return;
+          const lag = clamp(((Date.now() + mp.clockOffset) - Number(serverTime || Date.now())) / 1000, 0, 1.2);
+          const sx = W / Math.max(1, Number(ref?.[0]) || W);
+          const sy = H / Math.max(1, Number(ref?.[1]) || H);
+          for (const row of rows || []) {
+            enemyBullets.push({
+              _netId: row[0],
+              x: (row[1] + row[3] * lag) * sx, y: (row[2] + row[4] * lag) * sy,
+              vx: row[3] * sx, vy: row[4] * sy, r: row[5], damage: row[6],
+              life: Math.max(.1, row[7] - lag), color: row[8], phase: row[9],
+              age: lag, homing: row[10], homingTime: row[11], accel: row[12],
+              wave: row[13], waveSpeed: row[14], baseAngle: row[15], baseSpeed: row[16],
+            });
+          }
+        }
+
         function mpSendState(dt) {
           if (!mp.active || !mp.connected || !player || state.spectating) return;
           mp.sendTimer -= dt;
@@ -5238,6 +5532,7 @@
             afterburn: player.afterburn > 0 ? 1 : 0,
             weaponTier: player.weaponTier, engineTier: player.engineTier,
             armorTier: player.armorTier,
+            drones: player.drones, size: Math.round(player.size * 100) / 100,
             shield: Math.ceil(player.shield), maxShield: Math.ceil(player.maxShield),
             score: Math.floor(state.score), kills: state.kills, stage: state.stage,
             special: player.special ? { active: player.special.active } : null,
@@ -5325,6 +5620,7 @@
           const r = mp.remotePlayer, ship = r.ship || SHIPS[0];
           ctx.save();
           ctx.translate(r.x, r.y);
+          ctx.scale(r.size || 1, r.size || 1);
           ctx.rotate(r.angle + Math.PI / 2);
           ctx.globalAlpha = (r.invuln > 0 && Math.floor(r.invuln * 18) % 2 === 0) ? 0.35 : 0.85;
           const eg = ctx.createRadialGradient(0, 20, 0, 0, 20, 34);
@@ -5342,6 +5638,20 @@
             ctx.strokeStyle = "#ff5bd7"; ctx.lineWidth = 2;
             ctx.beginPath(); ctx.arc(r.x, r.y, 24 + Math.sin(state.time * 3) * 1.5, 0, TAU); ctx.stroke(); ctx.restore();
           }
+          for (let i = 0; i < (r.drones || 0); i++) {
+            const a = state.time * 1.35 + (i * TAU) / r.drones;
+            const dx = r.x + Math.cos(a) * (48 + r.drones * 2);
+            const dy = r.y + Math.sin(a) * (48 + r.drones * 2);
+            ctx.save();
+            ctx.translate(dx, dy);
+            ctx.rotate(a + Math.PI / 2);
+            ctx.fillStyle = "#ffd0f1";
+            ctx.shadowBlur = 12;
+            ctx.shadowColor = "#ff5bd7";
+            ctx.beginPath();
+            ctx.moveTo(0, -7); ctx.lineTo(7, 5); ctx.lineTo(0, 2); ctx.lineTo(-7, 5);
+            ctx.closePath(); ctx.fill(); ctx.restore();
+          }
           drawPilotLabel(r.x, r.y - 36, r.name || mp.remoteName, "#ff5bd7");
         }
 
@@ -5355,7 +5665,7 @@
             player.x = mp.remotePlayer.x;
             player.y = mp.remotePlayer.y;
           }
-          update(dt); mpSendState(dt); draw();
+          update(dt); mpSendState(dt); mpSendWorld(dt); draw();
           if (mp.active && mp.remotePlayer && mp.remotePlayer.alive) {
             ctx.save();
             if (state.shake > 0.2) ctx.translate(rand(state.shake, -state.shake), rand(state.shake, -state.shake));
