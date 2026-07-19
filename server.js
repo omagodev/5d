@@ -612,3 +612,26 @@ httpServer.listen(PORT, () => {
   console.log(`  ║  http://localhost:${PORT}                      ║`);
   console.log(`  ╚══════════════════════════════════════════════╝\n`);
 });
+
+let shuttingDown = false;
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[server] ${signal} recebido; encerrando conexões...`);
+
+  for (const room of rooms.values()) room.stop();
+  for (const client of wss.clients) client.close(1001, "Servidor reiniciando");
+
+  httpServer.close(() => {
+    console.log("[server] Encerramento concluído.");
+    process.exit(0);
+  });
+
+  setTimeout(() => {
+    console.error("[server] Tempo limite de encerramento excedido.");
+    process.exit(1);
+  }, 5000).unref();
+}
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
