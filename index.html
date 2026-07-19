@@ -950,7 +950,7 @@
       #matchPlayers.on { display: block; }
       .matchPlayerRow {
         display: grid;
-        grid-template-columns: 9px 1fr auto;
+        grid-template-columns: 9px 1fr auto auto;
         gap: 8px;
         align-items: center;
         padding: 4px 3px;
@@ -961,6 +961,29 @@
       .matchPlayerRow .pilotDot { width: 7px; height: 7px; border-radius: 50%; background: #8cffc2; box-shadow: 0 0 8px #8cffc2; }
       .matchPlayerRow.remote .pilotDot { background: var(--pink); box-shadow: 0 0 8px var(--pink); }
       .matchPlayerRow .shipTag { color: #8499b5; font-size: 9px; }
+      .matchPlayerRow .liveScore { color: #dffcff; font-variant-numeric: tabular-nums; }
+      .matchPlayerRow.leader { color: var(--gold); }
+      .matchPlayerRow.leader .liveScore::before { content: "♛ "; }
+      #matchLead {
+        padding: 5px 3px 2px;
+        color: var(--gold);
+        text-align: center;
+        font-size: 9px;
+        font-weight: 900;
+        letter-spacing: .12em;
+      }
+      #bossReportScreen .panel { max-width: 680px; text-align: center; }
+      .bossReportGrid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        margin: 22px 0;
+      }
+      .bossReportGrid .stat { padding: 13px 8px; }
+      #bossTeamReport { margin: 12px 0 20px; }
+      @media (max-width: 560px) {
+        .bossReportGrid { grid-template-columns: repeat(2, 1fr); }
+      }
       .lobbyInfo {
         text-align: center;
         margin-top: 20px;
@@ -1164,6 +1187,25 @@
       </div>
     </div>
 
+    <div id="bossReportScreen" class="screen">
+      <div class="panel">
+        <div class="eyebrow">PASSAGEM DE SETOR CONCLUÍDA</div>
+        <h2 id="bossReportTitle" class="upgradeTitle">Chefe derrotado</h2>
+        <p id="bossReportSub" class="upgradeSub">Analise o desempenho antes de avançar.</p>
+        <div class="bossReportGrid">
+          <div class="stat"><span class="label">Fase</span><strong id="bossReportStage">5</strong></div>
+          <div class="stat"><span class="label">Tempo</span><strong id="bossReportTime">0:00</strong></div>
+          <div class="stat"><span class="label">Pontuação</span><strong id="bossReportScore">0</strong></div>
+          <div class="stat"><span class="label">Abates</span><strong id="bossReportKills">0</strong></div>
+        </div>
+        <div id="bossTeamReport" class="rankList"></div>
+        <div class="actions" style="justify-content:center">
+          <button id="bossAdvanceBtn">Escolher melhoria e avançar</button>
+          <button id="bossExitBtn" class="secondary">Sair para o início</button>
+        </div>
+      </div>
+    </div>
+
     <div id="shipScreen" class="screen">
       <div class="panel" style="max-width: 980px">
         <div class="eyebrow">HANGAR ESTELAR</div>
@@ -1243,6 +1285,15 @@
           upgrades: document.getElementById("upgradeScreen"),
           pause: document.getElementById("pauseScreen"),
           gameOver: document.getElementById("gameOverScreen"),
+          bossReport: document.getElementById("bossReportScreen"),
+          bossReportTitle: document.getElementById("bossReportTitle"),
+          bossReportSub: document.getElementById("bossReportSub"),
+          bossReportStage: document.getElementById("bossReportStage"),
+          bossReportTime: document.getElementById("bossReportTime"),
+          bossReportScore: document.getElementById("bossReportScore"),
+          bossReportKills: document.getElementById("bossReportKills"),
+          bossTeamReport: document.getElementById("bossTeamReport"),
+          bossAdvanceBtn: document.getElementById("bossAdvanceBtn"),
           stageText: document.getElementById("stageText"),
           levelText: document.getElementById("levelText"),
           scoreText: document.getElementById("scoreText"),
@@ -1310,6 +1361,7 @@
           choosing: false,
           gameOver: false,
           spectating: false,
+          pendingBossAdvance: false,
           time: 0,
           last: performance.now(),
           stage: 1,
@@ -1848,15 +1900,18 @@
             previewCtx.lineWidth = 2.4 / side;
             previewCtx.shadowBlur = 18;
             previewCtx.shadowColor = ship.color;
+            const previewShape = ship.id === "colosso"
+              ? [[-36,-54],[36,-54],[61,-28],[72,36],[38,55],[18,38],[-18,38],[-38,55],[-72,36],[-61,-28]]
+              : ship.id === "espectro"
+                ? [[0,-96],[13,-18],[56,42],[18,25],[7,68],[0,47],[-7,68],[-18,25],[-56,42],[-13,-18]]
+                : ship.id === "tempestade"
+                  ? [[-24,-76],[-5,-31],[0,-12],[5,-31],[24,-76],[43,-18],[70,42],[28,31],[0,65],[-28,31],[-70,42],[-43,-18]]
+                  : [[0,-78],[25,-24],[72,38],[26,27],[0,66],[-26,27],[-72,38],[-25,-24]];
             previewCtx.beginPath();
-            previewCtx.moveTo(0, -spec.body);
-            previewCtx.lineTo(spec.width, -24);
-            previewCtx.lineTo(spec.wing, 38);
-            previewCtx.lineTo(spec.width * .72, 28);
-            previewCtx.lineTo(0, 66);
-            previewCtx.lineTo(-spec.width * .72, 28);
-            previewCtx.lineTo(-spec.wing, 38);
-            previewCtx.lineTo(-spec.width, -24);
+            previewCtx.moveTo(previewShape[0][0], previewShape[0][1]);
+            for (let i = 1; i < previewShape.length; i++) {
+              previewCtx.lineTo(previewShape[i][0], previewShape[i][1]);
+            }
             previewCtx.closePath();
             previewCtx.fill();
             previewCtx.stroke();
@@ -2221,6 +2276,7 @@
           state.choosing = false;
           state.gameOver = false;
           state.spectating = false;
+          state.pendingBossAdvance = false;
           state.time = 0;
           state.stage = 1;
           state.stageKills = 0;
@@ -2292,6 +2348,7 @@
           ui.start.classList.remove("show");
           ui.gameOver.classList.remove("show");
           ui.pause.classList.remove("show");
+          ui.bossReport.classList.remove("show");
           ui.spectatorStatus.classList.remove("on");
           ui.upgrades.classList.remove("show");
           ui.hud.classList.add("visible");
@@ -2441,6 +2498,8 @@
           });
         }
 
+        const BOSS_NAMES = ["ARCONTE DE ÍON", "SERAFIM DO VÁCUO", "TITÃ SOLAR"];
+
         function spawnBoss() {
           state.bossActive = true;
           enemyBullets = [];
@@ -2479,13 +2538,16 @@
           enemies.push(boss);
           showBanner(
             "CHEFÃO — " +
-              ["ARCONTE DE ÍON", "SERAFIM DO VÁCUO", "TITÃ SOLAR"][kind],
+              BOSS_NAMES[kind],
           );
           audio.tone(65, 0.7, "sawtooth", 0.16, -18);
           updateUI();
         }
 
         function nextStage() {
+          state.choosing = false;
+          state.pendingBossAdvance = false;
+          ui.bossReport.classList.remove("show");
           state.stage++;
           state.stageKills = 0;
           state.targetKills = 12 + Math.floor(state.stage * 3.4);
@@ -2502,6 +2564,51 @@
           if (state.stage % 5 === 0) {
             spawnQueue.push({ t: 2.4, fn: spawnBoss });
           }
+        }
+
+        function formatRunTime(totalSeconds) {
+          const seconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+          return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+        }
+
+        function showBossReport(info = {}) {
+          const kind = Number(info.bossKind ?? Math.floor(state.stage / 5) % 3) % 3;
+          const players = info.players?.length
+            ? info.players
+            : [{ id: mp.playerId, name: getPilotName(), shipId: selectedShip.id, score: state.score, kills: state.kills }];
+          state.choosing = true;
+          state.pendingBossAdvance = false;
+          enemyBullets = [];
+          mp.bossControllerId = info.controllerId ?? mp.playerId;
+          ui.bossReportTitle.textContent = BOSS_NAMES[kind] + " DERROTADO";
+          ui.bossReportStage.textContent = info.stage || state.stage;
+          ui.bossReportTime.textContent = formatRunTime(info.durationSeconds ?? state.time);
+          ui.bossReportScore.textContent = fmt(state.score);
+          ui.bossReportKills.textContent = state.kills;
+          const sorted = [...players].sort(
+            (a, b) => (b.score || 0) - (a.score || 0) || (b.kills || 0) - (a.kills || 0),
+          );
+          ui.bossTeamReport.innerHTML = sorted.map((entry, index) => {
+            const ship = shipById(entry.shipId);
+            return `<div class="rankRow ${index === 0 ? "top" : ""}"><span class="pos">${index === 0 ? "♛" : `#${index + 1}`}</span><div><div class="who">${escapeHTML(entry.name || "PILOTO")}</div><div class="meta">${ship.icon} ${ship.name} · ${entry.kills || 0} abates</div></div><span class="pts">${fmt(entry.score || 0)}</span></div>`;
+          }).join("");
+          const canAdvance = !mp.active || mp.bossControllerId === mp.playerId;
+          ui.bossAdvanceBtn.disabled = !canAdvance;
+          ui.bossAdvanceBtn.textContent = canAdvance
+            ? "Escolher melhoria e avançar"
+            : "Aguardando piloto responsável...";
+          ui.bossReportSub.textContent = canAdvance
+            ? "Confira o desempenho da equipe e libere a melhoria de passagem."
+            : "O piloto sobrevivente responsável liberará a próxima passagem.";
+          ui.bossReport.classList.add("show");
+        }
+
+        function startBossUpgrade() {
+          ui.bossReport.classList.remove("show");
+          if (state.spectating) return;
+          state.choosing = false;
+          state.pendingBossAdvance = true;
+          openUpgrade(true);
         }
 
         function killEnemy(e) {
@@ -2559,8 +2666,12 @@
             boss = null;
             player.hp = Math.min(player.maxHp, player.hp + player.maxHp * 0.35);
             player.shield = player.maxShield;
-            spawnQueue.push({ t: 1.4, fn: () => openUpgrade(true) });
-            spawnQueue.push({ t: 2.0, fn: nextStage });
+            if (!mp.active) {
+              spawnQueue.push({
+                t: 1.2,
+                fn: () => showBossReport({ bossKind: e.kind, stage: state.stage }),
+              });
+            }
           } else if (!state.bossActive && state.stage % 5 !== 0) {
             state.stageKills++;
             if (
@@ -2689,7 +2800,9 @@
           state.gameOver = true;
           state.running = false;
           state.spectating = false;
+          state.pendingBossAdvance = false;
           ui.spectatorStatus.classList.remove("on");
+          ui.bossReport.classList.remove("show");
           ui.goTitle.textContent = "A forja apagou.";
           ui.goSub.textContent = "As três vidas foram consumidas, mas cada queda alimenta a próxima tentativa.";
           shock(player.x, player.y, "#ff5bd7", 380, 1);
@@ -3256,6 +3369,8 @@
             card.innerHTML = `<span class="rarity">${bossReward ? "RECOMPENSA DE CHEFE" : "NÍVEL " + level}</span>
         <div class="icon">${u.icon}</div><h3>${u.name}</h3><p>${u.desc}</p>`;
             const pick = () => {
+              const completesBossPassage = state.pendingBossAdvance;
+              state.pendingBossAdvance = false;
               upgradeLevels[u.id] = (upgradeLevels[u.id] || 0) + 1;
               u.apply();
               state.choosing = false;
@@ -3265,6 +3380,15 @@
               shock(player.x, player.y, "#76f7ff", 150, 0.55);
               burst(player.x, player.y, "#b46cff", 32, 260, 4, 0.8);
               updateUI();
+              if (completesBossPassage) {
+                if (mp.active && mp.connected) {
+                  state.choosing = true;
+                  net.send({ type: "boss:ready" });
+                  showToast("Melhoria confirmada · aguardando equipe");
+                } else {
+                  nextStage();
+                }
+              }
             };
             card.addEventListener("click", pick);
             card.addEventListener("keydown", (e) => {
@@ -3964,6 +4088,89 @@
           drawParallaxLayer(2, t);
         }
 
+        function drawShipEngines(ship, flame, color) {
+          const jets = ship.id === "colosso"
+            ? [{ x: -13, w: 7, m: .78 }, { x: 13, w: 7, m: .78 }]
+            : ship.id === "tempestade"
+              ? [{ x: -17, w: 5, m: .92 }, { x: 0, w: 4, m: .62 }, { x: 17, w: 5, m: .92 }]
+              : ship.id === "espectro"
+                ? [{ x: 0, w: 4, m: 1.35 }]
+                : [{ x: 0, w: 7, m: 1 }];
+          ctx.fillStyle = color;
+          for (const jet of jets) {
+            ctx.beginPath();
+            ctx.moveTo(jet.x - jet.w, 16);
+            ctx.quadraticCurveTo(jet.x, 18 + flame * jet.m, jet.x + jet.w, 16);
+            ctx.closePath();
+            ctx.fill();
+          }
+        }
+
+        function drawShipHull(ship, tier = 0, remote = false) {
+          const accent = tier >= 4 ? "#ff5bd7" : ship.color;
+          const hull = ctx.createLinearGradient(-32, 0, 32, 0);
+          hull.addColorStop(0, remote ? "#331d4d" : "#1a2b4b");
+          hull.addColorStop(.48, remote ? "#ffd0f1" : "#d9f7ff");
+          hull.addColorStop(1, remote ? "#5d2c73" : "#263f6d");
+          ctx.fillStyle = hull;
+          ctx.strokeStyle = accent;
+          ctx.lineWidth = 1.4;
+          ctx.shadowBlur = 8;
+          ctx.shadowColor = accent;
+
+          if (ship.id === "colosso") {
+            // Fortaleza larga, quadrada e com dois blocos de propulsão.
+            ctx.beginPath();
+            ctx.moveTo(-14, -25); ctx.lineTo(14, -25); ctx.lineTo(25, -12);
+            ctx.lineTo(31, 17); ctx.lineTo(16, 23); ctx.lineTo(9, 14);
+            ctx.lineTo(-9, 14); ctx.lineTo(-16, 23); ctx.lineTo(-31, 17);
+            ctx.lineTo(-25, -12); ctx.closePath(); ctx.fill(); ctx.stroke();
+            ctx.fillStyle = "rgba(8,17,38,.9)";
+            ctx.fillRect(-29, -5, 9, 24); ctx.fillRect(20, -5, 9, 24);
+            ctx.strokeRect(-29, -5, 9, 24); ctx.strokeRect(20, -5, 9, 24);
+            ctx.fillStyle = accent; ctx.fillRect(-8, -19, 16, 9);
+          } else if (ship.id === "espectro") {
+            // Interceptador agulha, muito estreito, com asas em crescente.
+            ctx.beginPath();
+            ctx.moveTo(0, -39); ctx.lineTo(7, -8); ctx.lineTo(27, 14);
+            ctx.lineTo(10, 8); ctx.lineTo(4, 25); ctx.lineTo(0, 17);
+            ctx.lineTo(-4, 25); ctx.lineTo(-10, 8); ctx.lineTo(-27, 14);
+            ctx.lineTo(-7, -8); ctx.closePath(); ctx.fill(); ctx.stroke();
+            ctx.strokeStyle = "rgba(255,255,255,.7)";
+            ctx.beginPath(); ctx.moveTo(-25, 13); ctx.quadraticCurveTo(0, -2, 25, 13); ctx.stroke();
+            ctx.fillStyle = accent;
+            ctx.beginPath(); ctx.moveTo(0, -30); ctx.lineTo(3, 7); ctx.lineTo(0, 14); ctx.lineTo(-3, 7); ctx.closePath(); ctx.fill();
+          } else if (ship.id === "tempestade") {
+            // Plataforma de mísseis com casco bifurcado e pods laterais.
+            ctx.beginPath();
+            ctx.moveTo(-8, -27); ctx.lineTo(-2, -10); ctx.lineTo(0, -3);
+            ctx.lineTo(2, -10); ctx.lineTo(8, -27); ctx.lineTo(15, -8);
+            ctx.lineTo(24, 17); ctx.lineTo(9, 13); ctx.lineTo(0, 24);
+            ctx.lineTo(-9, 13); ctx.lineTo(-24, 17); ctx.lineTo(-15, -8); ctx.closePath(); ctx.fill(); ctx.stroke();
+            ctx.fillStyle = "rgba(10,14,36,.92)";
+            for (const x of [-20, 20]) {
+              ctx.beginPath(); ctx.rect(x - 5, -10, 10, 27); ctx.fill(); ctx.stroke();
+              ctx.fillStyle = accent; ctx.fillRect(x - 2, -6, 4, 4); ctx.fillRect(x - 2, 2, 4, 4);
+              ctx.fillStyle = "rgba(10,14,36,.92)";
+            }
+          } else {
+            // Caça delta equilibrado, angular e de asas abertas.
+            ctx.beginPath();
+            ctx.moveTo(0, -31); ctx.lineTo(9, -9); ctx.lineTo(29 + tier, 15);
+            ctx.lineTo(8, 9); ctx.lineTo(0, 22); ctx.lineTo(-8, 9);
+            ctx.lineTo(-29 - tier, 15); ctx.lineTo(-9, -9); ctx.closePath(); ctx.fill(); ctx.stroke();
+            ctx.fillStyle = accent;
+            ctx.beginPath(); ctx.moveTo(0, -21); ctx.lineTo(6, 3); ctx.lineTo(0, 12); ctx.lineTo(-6, 3); ctx.closePath(); ctx.fill();
+          }
+
+          if (tier >= 1) {
+            ctx.fillStyle = accent;
+            ctx.fillRect(-26 - Math.min(5, tier), 10, 5, 3);
+            ctx.fillRect(21 + Math.min(5, tier), 10, 5, 3);
+          }
+          ctx.shadowBlur = 0;
+        }
+
         function drawPlayer() {
           const p = player;
           ctx.save();
@@ -3995,11 +4202,7 @@
             Math.sin(state.time * 28) * 5 +
             p.engineTier * 2 +
             (p.afterburn > 0 ? 12 : 0);
-          ctx.beginPath();
-          ctx.moveTo(-7, 17);
-          ctx.quadraticCurveTo(0, 18 + flame, 7, 17);
-          ctx.closePath();
-          ctx.fill();
+          drawShipEngines(p.ship, flame, ctx.fillStyle);
           ctx.globalCompositeOperation = "source-over";
 
           const tier = Math.min(6, Math.floor(p.weaponTier / 3));
@@ -4023,35 +4226,7 @@
             ctx.stroke();
           }
 
-          const bodyGrad = ctx.createLinearGradient(-22, 0, 22, 0);
-          bodyGrad.addColorStop(0, "#30486f");
-          bodyGrad.addColorStop(0.45, "#d9f7ff");
-          bodyGrad.addColorStop(0.55, "#7ab8ff");
-          bodyGrad.addColorStop(1, "#24365f");
-          ctx.fillStyle = bodyGrad;
-          ctx.beginPath();
-          ctx.moveTo(0, -28 - tier * 1.2);
-          ctx.lineTo(10, -7);
-          ctx.lineTo(20 + tier * 2, 13);
-          ctx.lineTo(7, 10);
-          ctx.lineTo(0, 20);
-          ctx.lineTo(-7, 10);
-          ctx.lineTo(-20 - tier * 2, 13);
-          ctx.lineTo(-10, -7);
-          ctx.closePath();
-          ctx.fill();
-
-          ctx.fillStyle = tier >= 4 ? "#ff5bd7" : p.ship.color;
-          ctx.shadowBlur = 14;
-          ctx.shadowColor = ctx.fillStyle;
-          ctx.beginPath();
-          ctx.moveTo(0, -18);
-          ctx.lineTo(5, 3);
-          ctx.lineTo(0, 10);
-          ctx.lineTo(-5, 3);
-          ctx.closePath();
-          ctx.fill();
-          ctx.shadowBlur = 0;
+          drawShipHull(p.ship, tier, false);
 
           if (tier >= 1) {
             ctx.strokeStyle = "#8fdfff";
@@ -4496,9 +4671,11 @@
           state.choosing = false;
           state.gameOver = false;
           state.spectating = false;
+          state.pendingBossAdvance = false;
           mp.inHangar = false;
           ui.pause.classList.remove("show");
           ui.gameOver.classList.remove("show");
+          ui.bossReport.classList.remove("show");
           ui.upgrades.classList.remove("show");
           ui.shipScreen.classList.remove("show");
           ui.hud.classList.remove("visible");
@@ -4654,6 +4831,17 @@
         document
           .getElementById("leaveMatchBtn")
           .addEventListener("click", leaveToStart);
+        ui.bossAdvanceBtn.addEventListener("click", () => {
+          if (ui.bossAdvanceBtn.disabled) return;
+          if (mp.active && mp.connected) {
+            ui.bossAdvanceBtn.disabled = true;
+            ui.bossAdvanceBtn.textContent = "Liberando melhoria...";
+            net.send({ type: "boss:advance-request" });
+          } else {
+            startBossUpgrade();
+          }
+        });
+        document.getElementById("bossExitBtn").addEventListener("click", leaveToStart);
         ui.soundBtn.addEventListener("click", () => {
           state.sound = !state.sound;
           ui.soundBtn.textContent =
@@ -4681,6 +4869,9 @@
           remoteName: "ALIADO", localName: "PILOTO", players: [],
           sendTimer: 0, enemyIdMap: new Map(), connected: false,
           inHangar: false, localReady: false, isHost: false,
+          bossControllerId: 0, remoteScore: 0, remoteKills: 0,
+          netInterval: 1 / 12,
+          applyingRemoteEvent: false,
         };
         function mpSetStatus(text, cls) {
           mpUI.mpStatus.textContent = text;
@@ -4692,11 +4883,6 @@
         }
         function renderMatchPlayers(players = mp.players) {
           mp.players = players;
-          mpUI.matchPlayers.innerHTML = players.map((entry) => {
-            const ship = shipById(entry.shipId);
-            const remote = entry.id !== mp.playerId;
-            return `<div class="matchPlayerRow ${remote ? "remote" : "self"}"><i class="pilotDot"></i><span>${escapeHTML(entry.name || "PILOTO")}</span><span class="shipTag">${ship.icon} ${ship.name}</span></div>`;
-          }).join("");
           mpUI.matchPlayers.classList.toggle("on", mp.active || players.length > 0);
           const remote = players.find((entry) => entry.id !== mp.playerId);
           const local = players.find((entry) => entry.id === mp.playerId);
@@ -4707,7 +4893,35 @@
             mpUI.remoteHpName.textContent = remote.name;
             if (mp.remotePlayer) mp.remotePlayer.name = remote.name;
           }
+          renderLiveScoreboard();
           renderHangarPlayers(players);
+        }
+
+        function renderLiveScoreboard() {
+          const entries = mp.players.map((entry) => {
+            const remote = entry.id !== mp.playerId;
+            return {
+              ...entry,
+              remote,
+              score: mp.active
+                ? (remote ? mp.remoteScore : Math.floor(state.score))
+                : Number(entry.score || 0),
+              kills: mp.active
+                ? (remote ? mp.remoteKills : state.kills)
+                : Number(entry.kills || 0),
+            };
+          });
+          const best = [...entries].sort((a, b) => b.score - a.score || b.kills - a.kills)[0];
+          const tied = entries.length > 1 && entries.every(
+            (entry) => entry.score === entries[0].score && entry.kills === entries[0].kills,
+          );
+          mpUI.matchPlayers.innerHTML = entries.map((entry) => {
+            const ship = shipById(entry.shipId);
+            const leader = mp.active && !tied && best?.id === entry.id;
+            return `<div class="matchPlayerRow ${entry.remote ? "remote" : "self"} ${leader ? "leader" : ""}"><i class="pilotDot"></i><span>${escapeHTML(entry.name || "PILOTO")}</span><span class="shipTag">${ship.icon} ${ship.name}</span><span class="liveScore">${fmt(entry.score)}</span></div>`;
+          }).join("") + (mp.active
+            ? `<div id="matchLead">${tied ? "DISPUTA EMPATADA" : `${escapeHTML(best?.name || "PILOTO")} ESTÁ NA FRENTE`}</div>`
+            : "");
         }
 
         function renderHangarPlayers(players) {
@@ -4746,6 +4960,10 @@
             mpSetStatus("CONECTANDO...", "waiting");
             this.ws.onopen = () => {
               mp.connected = true;
+              const effectiveType = navigator.connection?.effectiveType || "4g";
+              mp.netInterval = ["slow-2g", "2g"].includes(effectiveType)
+                ? 1 / 7
+                : effectiveType === "3g" ? 1 / 10 : 1 / 12;
               mp.localName = getPilotName();
               mpSetStatus("CONECTADO", "connected");
               this.send({ type: "join", shipId: selectedShip.id, name: mp.localName });
@@ -4799,6 +5017,7 @@
               }
               case "game:start": {
                 mp.active = true; mp.slot = msg.slot;
+                mp.remoteScore = 0; mp.remoteKills = 0;
                 mp.inHangar = false;
                 cancelAnimationFrame(shipPreviewFrame);
                 ui.shipScreen.classList.remove("show");
@@ -4839,10 +5058,13 @@
                 mp.remotePlayer.armorTier = d.armorTier || 0;
                 mp.remotePlayer.shield = d.shield || 0;
                 mp.remotePlayer.maxShield = d.maxShield || 0;
+                mp.remoteScore = Math.max(0, Number(d.score) || 0);
+                mp.remoteKills = Math.max(0, Number(d.kills) || 0);
                 if (d.special) mp.remotePlayer.special = d.special;
                 const hpP = mp.remotePlayer.maxHp > 0 ? (mp.remotePlayer.hp / mp.remotePlayer.maxHp * 100) : 0;
                 mpUI.remoteHpFill.style.width = hpP + "%";
                 mpUI.remoteHpText.textContent = Math.max(0, Math.ceil(mp.remotePlayer.hp));
+                renderLiveScoreboard();
                 break;
               }
               case "remote:fire": {
@@ -4887,17 +5109,38 @@
               }
               case "enemy:damage": {
                 const te = mp.enemyIdMap.get(msg.enemyId);
-                if (te && !te.dead) damageEnemy(te, msg.amount, msg.crit);
+                if (te && !te.dead) {
+                  const localStats = { score: state.score, kills: state.kills, combo: state.combo };
+                  mp.applyingRemoteEvent = true;
+                  try { damageEnemy(te, msg.amount, msg.crit); }
+                  finally {
+                    mp.applyingRemoteEvent = false;
+                    state.score = localStats.score;
+                    state.kills = localStats.kills;
+                    state.combo = localStats.combo;
+                  }
+                }
                 break;
               }
               case "enemy:killed": {
                 const ke = mp.enemyIdMap.get(msg.enemyId);
-                if (ke && !ke.dead) killEnemy(ke);
+                if (ke && !ke.dead) {
+                  const localStats = { score: state.score, kills: state.kills, combo: state.combo };
+                  mp.applyingRemoteEvent = true;
+                  try { killEnemy(ke); }
+                  finally {
+                    mp.applyingRemoteEvent = false;
+                    state.score = localStats.score;
+                    state.kills = localStats.kills;
+                    state.combo = localStats.combo;
+                  }
+                }
                 mp.enemyIdMap.delete(msg.enemyId);
                 break;
               }
               case "stage:next":
                 if (msg.stage > state.stage) nextStage();
+                mpSetStatus("MULTIPLAYER ATIVO", "connected");
                 break;
               case "stage:clear":
                 if (!state.stageClearTimer) {
@@ -4905,6 +5148,35 @@
                   enemies.forEach(o => { if (!o.boss) o.dead = true; });
                   showBanner("SETOR LIMPO");
                 }
+                break;
+              case "boss:report":
+                {
+                  const remoteResult = (msg.players || []).find((entry) => entry.id !== mp.playerId);
+                  if (remoteResult) {
+                    mp.remoteScore = Number(remoteResult.score) || 0;
+                    mp.remoteKills = Number(remoteResult.kills) || 0;
+                  }
+                }
+                renderMatchPlayers(msg.players || mp.players);
+                showBossReport(msg);
+                break;
+              case "boss:upgrade":
+                startBossUpgrade();
+                break;
+              case "boss:controller": {
+                mp.bossControllerId = msg.controllerId;
+                const canAdvance = msg.controllerId === mp.playerId;
+                ui.bossAdvanceBtn.disabled = !canAdvance;
+                ui.bossAdvanceBtn.textContent = canAdvance
+                  ? "Escolher melhoria e avançar"
+                  : "Aguardando piloto responsável...";
+                break;
+              }
+              case "boss:advance-denied":
+                showToast(msg.reason || "Aguarde para avançar.");
+                break;
+              case "boss:ready-state":
+                mpSetStatus(`${(msg.ready || []).length}/${(msg.required || []).length} PRONTOS PARA AVANÇAR`, "waiting");
                 break;
               case "remote:died":
                 if (mp.remotePlayer) {
@@ -4951,18 +5223,26 @@
           if (!mp.active || !mp.connected || !player || state.spectating) return;
           mp.sendTimer -= dt;
           if (mp.sendTimer > 0) return;
-          mp.sendTimer = 1 / 20;
+          if (net.ws?.bufferedAmount > 16_384) {
+            mp.sendTimer = 1 / 6;
+            return;
+          }
+          mp.sendTimer = mp.netInterval;
           net.send({ type: "state", data: {
-            x: player.x, y: player.y, refW: W, refH: H,
-            angle: player.angle, vx: player.vx, vy: player.vy,
-            hp: player.hp, maxHp: player.maxHp,
+            x: Math.round(player.x), y: Math.round(player.y), refW: W, refH: H,
+            angle: Math.round(player.angle * 1000) / 1000,
+            vx: Math.round(player.vx), vy: Math.round(player.vy),
+            hp: Math.ceil(player.hp), maxHp: Math.ceil(player.maxHp),
             alive: !state.gameOver && state.lives > 0,
-            invuln: player.invuln, afterburn: player.afterburn,
+            invuln: Math.round(player.invuln * 10) / 10,
+            afterburn: player.afterburn > 0 ? 1 : 0,
             weaponTier: player.weaponTier, engineTier: player.engineTier,
-            armorTier: player.armorTier, shield: player.shield, maxShield: player.maxShield,
+            armorTier: player.armorTier,
+            shield: Math.ceil(player.shield), maxShield: Math.ceil(player.maxShield),
             score: Math.floor(state.score), kills: state.kills, stage: state.stage,
             special: player.special ? { active: player.special.active } : null,
           }});
+          renderLiveScoreboard();
         }
 
         const _origFirePlayer = firePlayer;
@@ -4974,10 +5254,17 @@
           for (let i = bullets.length - count; i < bullets.length; i++) {
             if (i < 0) continue;
             const b = bullets[i];
-            bData.push({ angle: Math.atan2(b.vy, b.vx), speed: Math.hypot(b.vx, b.vy),
-              damage: b.damage, crit: b.crit, isMissile: b.isMissile, homing: b.homing, pierce: b.pierce });
+            bData.push({
+              angle: Math.round(Math.atan2(b.vy, b.vx) * 1000) / 1000,
+              speed: Math.round(Math.hypot(b.vx, b.vy)),
+              damage: Math.round(b.damage * 10) / 10,
+              crit: b.crit, isMissile: b.isMissile,
+              homing: Math.round(b.homing * 10) / 10, pierce: b.pierce,
+            });
           }
-          net.send({ type: "fire", data: { x: player.x, y: player.y, refW: W, refH: H, bullets: bData } });
+          net.send({ type: "fire", data: {
+            x: Math.round(player.x), y: Math.round(player.y), refW: W, refH: H, bullets: bData,
+          }});
         };
 
         const _origActivateSpecial = activateSpecial;
@@ -4991,7 +5278,7 @@
         const _origDamageEnemy = damageEnemy;
         damageEnemy = function(e, amount, crit) {
           _origDamageEnemy(e, amount, crit);
-          if (mp.active && mp.connected && !state.spectating && e._netId !== undefined)
+          if (mp.active && mp.connected && !state.spectating && !mp.applyingRemoteEvent && e._netId !== undefined)
             net.send({ type: "enemy:damage", enemyId: e._netId, amount, crit: crit || false });
         };
 
@@ -4999,8 +5286,14 @@
         killEnemy = function(e) {
           const nid = e._netId;
           _origKillEnemy(e);
-          if (mp.active && mp.connected && !state.spectating && nid !== undefined)
-            net.send({ type: "enemy:killed", enemyId: nid });
+          if (mp.active && mp.connected && !state.spectating && !mp.applyingRemoteEvent && nid !== undefined)
+            net.send({
+              type: "enemy:killed",
+              enemyId: nid,
+              score: Math.floor(state.score),
+              kills: state.kills,
+              stage: state.stage,
+            });
         };
 
         const _origLoseLife = loseLife;
@@ -5040,19 +5333,9 @@
           ctx.globalCompositeOperation = "lighter";
           ctx.fillStyle = ship.color;
           const fl = 18 + Math.sin(state.time * 28) * 5;
-          ctx.beginPath(); ctx.moveTo(-7, 17); ctx.quadraticCurveTo(0, 18 + fl, 7, 17); ctx.closePath(); ctx.fill();
+          drawShipEngines(ship, fl, ship.color);
           ctx.globalCompositeOperation = "source-over";
-          const bg = ctx.createLinearGradient(-22, 0, 22, 0);
-          bg.addColorStop(0, "#4a2058"); bg.addColorStop(0.45, "#ffc8ee");
-          bg.addColorStop(0.55, "#c87aff"); bg.addColorStop(1, "#3a1f5f");
-          ctx.fillStyle = bg;
-          ctx.beginPath();
-          ctx.moveTo(0, -28); ctx.lineTo(10, -7); ctx.lineTo(20, 13);
-          ctx.lineTo(7, 10); ctx.lineTo(0, 20); ctx.lineTo(-7, 10);
-          ctx.lineTo(-20, 13); ctx.lineTo(-10, -7); ctx.closePath(); ctx.fill();
-          ctx.fillStyle = ship.color; ctx.shadowBlur = 14; ctx.shadowColor = ship.color;
-          ctx.beginPath(); ctx.moveTo(0, -18); ctx.lineTo(5, 3); ctx.lineTo(0, 10); ctx.lineTo(-5, 3);
-          ctx.closePath(); ctx.fill(); ctx.shadowBlur = 0;
+          drawShipHull(ship, Math.min(6, Math.floor(r.weaponTier / 3)), true);
           ctx.restore();
           if (r.maxShield > 0 && r.shield > 0) {
             ctx.save(); ctx.globalAlpha = 0.12 + 0.16 * (r.shield / r.maxShield);

@@ -33,6 +33,11 @@ pronto. As escolhas aparecem para toda a sala e somente o host pode iniciar,
 depois que os dois pilotos estiverem prontos. Um piloto eliminado permanece
 como espectador até o parceiro também ser abatido ou a sala ser encerrada.
 
+Durante a partida, o placar indica o piloto que está na frente. Depois de cada
+chefe, a passagem de setor mostra os dados da equipe e aguarda as melhorias dos
+pilotos sobreviventes antes de avançar. O servidor comprime os arquivos e reduz
+a frequência de estados WebSocket automaticamente em conexões lentas.
+
 O servidor deve permanecer com `instances: 1` no PM2 porque as salas WebSocket
 ficam em memória. O ranking e o histórico das partidas são persistidos em:
 

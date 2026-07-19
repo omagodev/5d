@@ -11,6 +11,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const zlib = require("zlib");
 const { WebSocketServer } = require("ws");
 const {
   databasePath,
@@ -21,6 +22,7 @@ const {
 } = require("./database");
 
 const PORT = parseInt(process.env.PORT, 10) || 4050;
+const staticCache = new Map();
 
 const clampInteger = (value, min, max) =>
   Math.max(min, Math.min(max, Math.floor(Number(value) || 0)));
@@ -130,23 +132,57 @@ const httpServer = http.createServer((req, res) => {
     return;
   }
 
-  fs.readFile(filePath, (err, data) => {
+  fs.stat(filePath, (statError, stat) => {
+    if (statError || !stat.isFile()) {
+      res.writeHead(404, { "Content-Type": "text/plain" });
+      res.end("Not Found");
+      return;
+    }
+    const etag = `W/"${stat.size}-${Math.floor(stat.mtimeMs)}"`;
+    if (req.headers["if-none-match"] === etag) {
+      res.writeHead(304, { ETag: etag, "Cache-Control": "public, max-age=60, must-revalidate" });
+      res.end();
+      return;
+    }
+    fs.readFile(filePath, (err, data) => {
     if (err) {
       res.writeHead(404, { "Content-Type": "text/plain" });
       res.end("Not Found");
       return;
     }
-    res.writeHead(200, {
+    const compressible = [".html", ".js", ".css", ".json", ".svg"].includes(ext);
+    const cached = staticCache.get(filePath);
+    let body = data;
+    let encoding = "";
+    if (compressible) {
+      const entry = cached?.etag === etag
+        ? cached
+        : { etag, br: zlib.brotliCompressSync(data), gzip: zlib.gzipSync(data) };
+      staticCache.set(filePath, entry);
+      const accepted = String(req.headers["accept-encoding"] || "");
+      if (accepted.includes("br")) { body = entry.br; encoding = "br"; }
+      else if (accepted.includes("gzip")) { body = entry.gzip; encoding = "gzip"; }
+    }
+    const headers = {
       "Content-Type": MIME[ext] || "application/octet-stream",
-      "Cache-Control": "no-cache",
+      "Cache-Control": "public, max-age=60, must-revalidate",
+      "Content-Length": body.length,
+      ETag: etag,
+      Vary: "Accept-Encoding",
+    };
+    if (encoding) headers["Content-Encoding"] = encoding;
+    res.writeHead(200, headers);
+    res.end(body);
     });
-    res.end(data);
   });
 });
 
 /* ======================== WEBSOCKET SERVER ======================== */
 
-const wss = new WebSocketServer({ server: httpServer });
+const wss = new WebSocketServer({
+  server: httpServer,
+  perMessageDeflate: { threshold: 256 },
+});
 
 /* ---- helpers ---- */
 let nextRoomId = 1;
@@ -205,6 +241,10 @@ class Room {
     this.lastTick = Date.now();
     this.startedAt = new Date();
     this.recorded = false;
+    this.intermission = false;
+    this.bossUpgradeOpen = false;
+    this.bossControllerId = null;
+    this.bossReady = new Set();
   }
 
   playersPayload() {
@@ -215,13 +255,18 @@ class Room {
       alive: player.alive,
       ready: player.ready,
       isHost: index === 0,
+      score: player.score,
+      kills: player.kills,
+      stage: player.stage,
     }));
   }
 
   broadcast(msg, exclude = null) {
     const data = JSON.stringify(msg);
+    const ephemeral = msg.type === "remote:state";
     for (const p of this.players) {
       if (p !== exclude && p.ws.readyState === 1) {
+        if (ephemeral && p.ws.bufferedAmount > 32_768) continue;
         p.ws.send(data);
       }
     }
@@ -262,7 +307,14 @@ class Room {
           players: this.playersPayload(),
         });
       }
-      if (this.paused) {
+      if (this.intermission) {
+        if (this.bossControllerId === session.id) {
+          const controller = this.players.find((player) => player.alive) || this.players[0];
+          this.bossControllerId = controller?.id || null;
+          this.broadcast({ type: "boss:controller", controllerId: this.bossControllerId });
+        }
+        this.finishBossIntermissionIfReady();
+      } else if (this.paused) {
         this.paused = false;
         this.lastTick = Date.now();
         this.broadcast({
@@ -281,6 +333,10 @@ class Room {
     this.running = true;
     this.paused = false;
     this.recorded = false;
+    this.intermission = false;
+    this.bossUpgradeOpen = false;
+    this.bossControllerId = null;
+    this.bossReady.clear();
     this.startedAt = new Date();
     this.stage = 1;
     this.stageKills = 0;
@@ -319,6 +375,7 @@ class Room {
   stop() {
     this.running = false;
     this.paused = false;
+    this.intermission = false;
     if (this.tickInterval) {
       clearInterval(this.tickInterval);
       this.tickInterval = null;
@@ -446,8 +503,21 @@ class Room {
         killerPlayerId,
         isBoss: true,
       });
-      // Boss killed triggers next stage after delay
-      this.stageClearTimer = 2.0;
+      this.intermission = true;
+      this.paused = true;
+      this.bossUpgradeOpen = false;
+      this.bossReady.clear();
+      const controller = this.players.find((player) => player.alive) || this.players[0];
+      this.bossControllerId = controller?.id || null;
+      this.broadcast({
+        type: "boss:report",
+        stage: this.stage,
+        bossKind: enemy.kind || 0,
+        durationSeconds: Math.floor(this.time),
+        killerPlayerId,
+        controllerId: this.bossControllerId,
+        players: this.playersPayload(),
+      });
     } else {
       this.stageKills++;
       this.broadcast({
@@ -472,6 +542,46 @@ class Room {
         this.enemies.clear();
         this.broadcast({ type: "stage:clear" });
       }
+    }
+  }
+
+  openBossUpgrade(session) {
+    if (!this.intermission || this.bossUpgradeOpen) return;
+    if (session.id !== this.bossControllerId) {
+      session.send({ type: "boss:advance-denied", reason: "Aguarde o piloto responsável avançar." });
+      return;
+    }
+    this.bossUpgradeOpen = true;
+    this.broadcast({ type: "boss:upgrade", stage: this.stage });
+  }
+
+  markBossReady(session) {
+    if (!this.intermission || !this.bossUpgradeOpen || !session.alive) return;
+    this.bossReady.add(session.id);
+    const alivePlayers = this.players.filter((player) => player.alive);
+    this.broadcast({
+      type: "boss:ready-state",
+      ready: [...this.bossReady],
+      required: alivePlayers.map((player) => player.id),
+    });
+    this.finishBossIntermissionIfReady();
+  }
+
+  finishBossIntermissionIfReady() {
+    const alivePlayers = this.players.filter((player) => player.alive);
+    if (
+      this.intermission &&
+      this.bossUpgradeOpen &&
+      alivePlayers.length &&
+      alivePlayers.every((player) => this.bossReady.has(player.id))
+    ) {
+      this.intermission = false;
+      this.bossUpgradeOpen = false;
+      this.bossControllerId = null;
+      this.bossReady.clear();
+      this.paused = false;
+      this.lastTick = Date.now();
+      this.nextStage();
     }
   }
 
@@ -709,6 +819,7 @@ function handleMessage(session, msg) {
 
     case "enemy:killed": {
       if (!session.room || !session.room.running || !session.alive) return;
+      Object.assign(session, normalizedResult(msg));
       session.room.onEnemyKilled(msg.enemyId, session.id);
       break;
     }
@@ -755,7 +866,7 @@ function handleMessage(session, msg) {
     }
 
     case "game:pause": {
-      if (!session.room || !session.room.running) return;
+      if (!session.room || !session.room.running || session.room.intermission) return;
       session.room.paused = Boolean(msg.paused);
       session.room.lastTick = Date.now();
       session.room.broadcast({
@@ -764,6 +875,18 @@ function handleMessage(session, msg) {
         by: session.name,
         playerId: session.id,
       });
+      break;
+    }
+
+    case "boss:advance-request": {
+      if (!session.room || !session.room.running) return;
+      session.room.openBossUpgrade(session);
+      break;
+    }
+
+    case "boss:ready": {
+      if (!session.room || !session.room.running) return;
+      session.room.markBossReady(session);
       break;
     }
 
