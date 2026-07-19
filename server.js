@@ -172,6 +172,7 @@ class PlayerSession {
     this.room = null;
     this.shipId = "vanguarda";
     this.name = "PILOTO";
+    this.ready = false;
     this.alive = true;
     this.lastState = null;
     this.score = 0;
@@ -207,11 +208,13 @@ class Room {
   }
 
   playersPayload() {
-    return this.players.map((player) => ({
+    return this.players.map((player, index) => ({
       id: player.id,
       name: player.name,
       shipId: player.shipId,
       alive: player.alive,
+      ready: player.ready,
+      isHost: index === 0,
     }));
   }
 
@@ -251,6 +254,14 @@ class Room {
         playerId: session.id,
       });
       this.broadcast({ type: "room:players", players: this.playersPayload() });
+      if (!this.running) {
+        waitingRoom = this;
+        this.broadcast({
+          type: "room:waiting",
+          roomId: this.id,
+          players: this.playersPayload(),
+        });
+      }
       if (this.paused) {
         this.paused = false;
         this.lastTick = Date.now();
@@ -281,16 +292,21 @@ class Room {
     this.enemies.clear();
     this.lastTick = Date.now();
 
-    // Notify all players to start
+    for (const player of this.players) {
+      player.alive = true;
+      player.ready = false;
+      player.score = 0;
+      player.kills = 0;
+      player.stage = 1;
+    }
+    const players = this.playersPayload();
+
+    // Notify all players to start with the same synchronized snapshot.
     for (let i = 0; i < this.players.length; i++) {
-      this.players[i].alive = true;
-      this.players[i].score = 0;
-      this.players[i].kills = 0;
-      this.players[i].stage = 1;
       this.players[i].send({
         type: "game:start",
         slot: i,
-        players: this.playersPayload(),
+        players,
         stage: this.stage,
         seed: Math.floor(Math.random() * 999999),
       });
@@ -601,10 +617,13 @@ function handleMessage(session, msg) {
       session.shipId = cleanShipId(msg.shipId);
       session.name = cleanName(msg.name);
 
-      if (waitingRoom && waitingRoom.players.length === 1) {
+      const availableRoom = [...rooms.values()].find(
+        (room) => !room.running && room.players.length === 1,
+      );
+      if (availableRoom) {
         // Join existing room
-        const room = waitingRoom;
-        waitingRoom = null;
+        const room = availableRoom;
+        if (waitingRoom === room) waitingRoom = null;
         room.addPlayer(session);
         // Both players are ready — start the game
         room.broadcast({
@@ -612,7 +631,6 @@ function handleMessage(session, msg) {
           playerCount: 2,
           players: room.playersPayload(),
         });
-        setTimeout(() => room.start(), 1500);
       } else {
         // Create new room
         const room = new Room(nextRoomId++);
@@ -629,7 +647,7 @@ function handleMessage(session, msg) {
 
     case "state": {
       // Player state update — relay to other player
-      if (!session.room) return;
+      if (!session.room || !session.room.running || !session.alive) return;
       session.lastState = msg.data;
       const result = normalizedResult(msg.data);
       session.score = result.score;
@@ -648,7 +666,7 @@ function handleMessage(session, msg) {
 
     case "fire": {
       // Player fired — relay
-      if (!session.room) return;
+      if (!session.room || !session.room.running || !session.alive) return;
       session.room.broadcast(
         {
           type: "remote:fire",
@@ -661,7 +679,7 @@ function handleMessage(session, msg) {
     }
 
     case "special": {
-      if (!session.room) return;
+      if (!session.room || !session.room.running || !session.alive) return;
       session.room.broadcast(
         {
           type: "remote:special",
@@ -675,7 +693,7 @@ function handleMessage(session, msg) {
 
     case "enemy:damage": {
       // Client reports damage to an enemy
-      if (!session.room) return;
+      if (!session.room || !session.room.running || !session.alive) return;
       session.room.broadcast(
         {
           type: "enemy:damage",
@@ -690,7 +708,7 @@ function handleMessage(session, msg) {
     }
 
     case "enemy:killed": {
-      if (!session.room) return;
+      if (!session.room || !session.room.running || !session.alive) return;
       session.room.onEnemyKilled(msg.enemyId, session.id);
       break;
     }
@@ -710,6 +728,10 @@ function handleMessage(session, msg) {
       if (!session.alive) {
         session.room.checkGameOver();
       }
+      session.room.broadcast({
+        type: "room:players",
+        players: session.room.playersPayload(),
+      });
       break;
     }
 
@@ -725,6 +747,10 @@ function handleMessage(session, msg) {
         session,
       );
       session.room.checkGameOver();
+      session.room.broadcast({
+        type: "room:players",
+        players: session.room.playersPayload(),
+      });
       break;
     }
 
@@ -752,7 +778,9 @@ function handleMessage(session, msg) {
     }
 
     case "ship:selected": {
+      if (session.room && session.room.running) return;
       session.shipId = cleanShipId(msg.shipId);
+      session.ready = false;
       if (session.room) {
         session.room.broadcast(
           {
@@ -767,6 +795,36 @@ function handleMessage(session, msg) {
           players: session.room.playersPayload(),
         });
       }
+      break;
+    }
+
+    case "room:ready": {
+      if (!session.room || session.room.running) return;
+      session.ready = Boolean(msg.ready);
+      session.room.broadcast({
+        type: "room:players",
+        players: session.room.playersPayload(),
+      });
+      break;
+    }
+
+    case "game:start-request": {
+      const room = session.room;
+      if (!room || room.running) return;
+      const isHost = room.players[0] === session;
+      const canStart =
+        room.players.length === 2 && room.players.every((player) => player.ready);
+      if (!isHost || !canStart) {
+        session.send({
+          type: "game:start-denied",
+          reason: isHost
+            ? "Aguarde todos ficarem prontos."
+            : "Somente o host pode iniciar.",
+        });
+        return;
+      }
+      if (waitingRoom === room) waitingRoom = null;
+      room.start();
       break;
     }
   }

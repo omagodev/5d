@@ -28,6 +28,11 @@ em seguida, rode `pm2 save` novamente.
 
 ## Multiplayer e ranking
 
+No hangar multiplayer, cada piloto escolhe sua nave e confirma o estado de
+pronto. As escolhas aparecem para toda a sala e somente o host pode iniciar,
+depois que os dois pilotos estiverem prontos. Um piloto eliminado permanece
+como espectador até o parceiro também ser abatido ou a sala ser encerrada.
+
 O servidor deve permanecer com `instances: 1` no PM2 porque as salas WebSocket
 ficam em memória. O ranking e o histórico das partidas são persistidos em:
 

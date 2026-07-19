@@ -547,6 +547,7 @@
       #startScreen .nameRow { margin-top: 14px; }
       #startScreen .actions, #startScreen .controls { margin-top: 18px; }
       #rankScreen .panel { max-height: 94vh; overflow: auto; }
+      #shipScreen .panel { max-height: 96vh; overflow: auto; }
       .shipCard {
         display: grid;
         grid-template-columns: minmax(240px, 0.9fr) minmax(280px, 1.1fr);
@@ -662,6 +663,43 @@
       }
       .shipDots i.on { background: var(--cyan); box-shadow: 0 0 10px var(--cyan); }
       .selectShipBtn { width: 100%; margin-top: 20px; }
+      #mpHangar { display: none; margin-top: 18px; }
+      #mpHangar.on { display: block; }
+      #mpHangarPlayers {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 10px;
+      }
+      .hangarPilot {
+        padding: 11px 13px;
+        border-radius: 12px;
+        background: rgba(255,255,255,.045);
+        border: 1px solid rgba(255,255,255,.09);
+        text-align: left;
+      }
+      .hangarPilot.ready { border-color: rgba(140,255,194,.45); }
+      .hangarPilot strong, .hangarPilot span { display: block; }
+      .hangarPilot span { margin-top: 4px; color: #8ea4bf; font-size: 11px; }
+      .hangarPilot em { color: #8cffc2; font-style: normal; font-size: 10px; }
+      #hostStartBtn:disabled { opacity: .42; cursor: not-allowed; transform: none; }
+      #spectatorStatus {
+        position: fixed;
+        top: 74px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: none;
+        z-index: 46;
+        padding: 9px 16px;
+        border-radius: 999px;
+        background: rgba(5,10,24,.9);
+        border: 1px solid rgba(255,91,215,.45);
+        color: #ffd8f4;
+        font-size: 11px;
+        font-weight: 900;
+        letter-spacing: .12em;
+      }
+      #spectatorStatus.on { display: block; }
       /* ===== Ranking ===== */
       .rankList {
         margin-top: 18px;
@@ -845,6 +883,7 @@
         #shipScreen .upgradeSub { margin-bottom: 12px; font-size: 12px; }
         #shipScreen .eyebrow { margin-bottom: 8px; }
         #shipScreen .upgradeTitle { font-size: 28px; }
+        #mpHangarPlayers { grid-template-columns: 1fr; }
         .shipCard h3 { font-size: 25px; }
         .shipCard p { font-size: 11.5px; }
         .shipCard .spec { font-size: 10.5px; }
@@ -1096,6 +1135,7 @@
         <div class="actions" style="justify-content: center">
           <button id="resumeBtn">Continuar</button>
           <button id="restartFromPauseBtn" class="secondary">Reiniciar</button>
+          <button id="leaveMatchBtn" class="secondary">Sair para o início</button>
         </div>
       </div>
     </div>
@@ -1133,6 +1173,15 @@
           (Shift / E no teclado, ou o botão circular no toque). Arraste para os lados para navegar.
         </p>
         <div id="shipCards" class="shipGrid"></div>
+        <div id="mpHangar">
+          <div class="eyebrow">TRIPULAÇÃO DA SALA</div>
+          <div id="mpHangarPlayers"></div>
+          <p id="mpHangarHint" class="upgradeSub">Escolha uma nave e confirme quando estiver pronto.</p>
+          <div class="actions" style="justify-content:center">
+            <button id="hostStartBtn" style="display:none" disabled>Iniciar partida</button>
+            <button id="leaveHangarBtn" class="secondary">Sair da sala</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1166,6 +1215,7 @@
     </div>
 
     <div id="mpStatus"></div>
+    <div id="spectatorStatus">MODO ESPECTADOR · ACOMPANHANDO ALIADO</div>
     <div id="matchPlayers"></div>
     <div id="remoteHpWrap">
       <div id="remoteHpName" class="label">ALIADO</div>
@@ -1235,6 +1285,7 @@
           joystick: document.getElementById("joystick"),
           joystickKnob: document.getElementById("joystickKnob"),
           mobilePauseBtn: document.getElementById("mobilePauseBtn"),
+          spectatorStatus: document.getElementById("spectatorStatus"),
         };
 
         const input = {
@@ -1258,6 +1309,7 @@
           paused: false,
           choosing: false,
           gameOver: false,
+          spectating: false,
           time: 0,
           last: performance.now(),
           stage: 1,
@@ -1574,6 +1626,7 @@
             state.paused ||
             state.choosing ||
             state.gameOver ||
+            state.spectating ||
             !player
           )
             return;
@@ -1873,12 +1926,20 @@
               ${statHTML("ATAQUE", s.stats.atk, s.color)}
               ${statHTML("DEFESA", s.stats.def, s.color)}
               ${statHTML("VELOC.", s.stats.spd, s.color)}
-              <button class="selectShipBtn">Pilotar ${s.name}</button></div>`;
+              <button class="selectShipBtn">${mp.inHangar ? `Confirmar ${s.name}` : `Pilotar ${s.name}`}</button></div>`;
           const pick = () => {
             selectedShip = s;
-            cancelAnimationFrame(shipPreviewFrame);
-            ui.shipScreen.classList.remove("show");
-            resetGame();
+            if (mp.inHangar) {
+              net.send({ type: "ship:selected", shipId: s.id });
+              net.send({ type: "room:ready", ready: true });
+              mp.localReady = true;
+              c.querySelector(".selectShipBtn").textContent = "PRONTO ✓";
+              mpSetStatus("PRONTO · AGUARDANDO EQUIPE", "connected");
+            } else {
+              cancelAnimationFrame(shipPreviewFrame);
+              ui.shipScreen.classList.remove("show");
+              resetGame();
+            }
           };
           prev.addEventListener("click", () => changeShipPreview(-1));
           next.addEventListener("click", () => changeShipPreview(1));
@@ -1899,14 +1960,21 @@
           dots.innerHTML = SHIPS.map((_, i) => `<i class="${i === shipCarouselIndex ? "on" : ""}"></i>`).join("");
           c.querySelector(".shipDetails").appendChild(dots);
           drawShipPreview(c.querySelector("canvas"), s);
+          if (mp.inHangar && mp.connected) {
+            selectedShip = s;
+            mp.localReady = false;
+            net.send({ type: "ship:selected", shipId: s.id });
+          }
           setTimeout(() => c.focus(), 0);
         }
-        function openShipSelect() {
+        function openShipSelect(mode = "solo") {
+          mp.inHangar = mode === "multiplayer";
           ui.start.classList.remove("show");
           ui.gameOver.classList.remove("show");
           ui.mobileControls.classList.remove("on");
           shipCarouselIndex = Math.max(0, SHIPS.findIndex((s) => s.id === selectedShip.id));
           renderShipCards();
+          document.getElementById("mpHangar").classList.toggle("on", mp.inHangar);
           ui.shipScreen.classList.add("show");
         }
 
@@ -2152,6 +2220,7 @@
           state.paused = false;
           state.choosing = false;
           state.gameOver = false;
+          state.spectating = false;
           state.time = 0;
           state.stage = 1;
           state.stageKills = 0;
@@ -2223,6 +2292,7 @@
           ui.start.classList.remove("show");
           ui.gameOver.classList.remove("show");
           ui.pause.classList.remove("show");
+          ui.spectatorStatus.classList.remove("on");
           ui.upgrades.classList.remove("show");
           ui.hud.classList.add("visible");
           ui.mobileControls.classList.add("on");
@@ -2553,7 +2623,7 @@
         }
 
         function damagePlayer(amount) {
-          if (player.invuln > 0 || state.gameOver) return;
+          if (player.invuln > 0 || state.gameOver || state.spectating) return;
           let remaining = amount;
           if (player.shield > 0) {
             const block = Math.min(player.shield, remaining);
@@ -2580,7 +2650,8 @@
           audio.explode(true);
           state.shake = 24;
           if (state.lives <= 0) {
-            endGame(reason);
+            if (mp.active && mp.connected) enterSpectatorMode(reason);
+            else endGame(reason);
             return false;
           }
           enemyBullets = [];
@@ -2599,9 +2670,26 @@
           return true;
         }
 
+        function enterSpectatorMode(reason = "CASCO DESTRUÍDO") {
+          state.spectating = true;
+          state.choosing = false;
+          player.hp = 0;
+          player.vx = 0;
+          player.vy = 0;
+          bullets = bullets.filter((bullet) => bullet.remote);
+          ui.upgrades.classList.remove("show");
+          ui.specialBtn.classList.remove("on");
+          ui.mobileControls.classList.remove("on");
+          ui.spectatorStatus.classList.add("on");
+          showBanner("NAVE DESTRUÍDA · MODO ESPECTADOR");
+          showToast(`${reason} · acompanhando ${mp.remoteName || "o aliado"}`);
+        }
+
         function endGame(reason = "CASCO DESTRUÍDO") {
           state.gameOver = true;
           state.running = false;
+          state.spectating = false;
+          ui.spectatorStatus.classList.remove("on");
           ui.goTitle.textContent = "A forja apagou.";
           ui.goSub.textContent = "As três vidas foram consumidas, mas cada queda alimenta a próxima tentativa.";
           shock(player.x, player.y, "#ff5bd7", 380, 1);
@@ -2614,6 +2702,10 @@
           if (!mp.active) submitSoloResult();
           ui.specialBtn.classList.remove("on");
           ui.mobileControls.classList.remove("on");
+          const restartButton = document.getElementById("restartBtn");
+          const changeShipButton = document.getElementById("changeShipBtn");
+          restartButton.textContent = mp.active ? "Voltar ao início" : "Reiniciar missão";
+          changeShipButton.style.display = mp.active ? "none" : "inline-block";
           setTimeout(() => ui.gameOver.classList.add("show"), 450);
         }
 
@@ -3152,7 +3244,7 @@
         }
 
         function openUpgrade(bossReward = false) {
-          if (state.gameOver) return;
+          if (state.gameOver || state.spectating) return;
           state.choosing = true;
           const options = chooseUpgrades();
           ui.cards.innerHTML = "";
@@ -3217,10 +3309,10 @@
           spawnQueue = spawnQueue.filter((q) => q.t > 0);
           ready.forEach((q) => q.fn());
 
-          updatePlayer(dt);
+          if (!state.spectating) updatePlayer(dt);
           updateEnemies(dt);
           updateBullets(dt);
-          updatePickups(dt);
+          if (!state.spectating) updatePickups(dt);
           updateParticles(dt);
 
           if (state.stageClearTimer > 0) {
@@ -3798,7 +3890,7 @@
           drawParticles(false);
           drawEnemies();
           drawBullets();
-          if (player && (!state.gameOver || state.running)) drawPlayer();
+          if (player && !state.spectating && (!state.gameOver || state.running)) drawPlayer();
           drawParticles(true);
           drawShockwaves();
           drawTexts();
@@ -4396,6 +4488,28 @@
             mp.active ? "none" : "inline-block";
         }
 
+        function leaveToStart() {
+          if (mp.connected) net.disconnect();
+          cancelAnimationFrame(shipPreviewFrame);
+          state.running = false;
+          state.paused = false;
+          state.choosing = false;
+          state.gameOver = false;
+          state.spectating = false;
+          mp.inHangar = false;
+          ui.pause.classList.remove("show");
+          ui.gameOver.classList.remove("show");
+          ui.upgrades.classList.remove("show");
+          ui.shipScreen.classList.remove("show");
+          ui.hud.classList.remove("visible");
+          ui.mobileControls.classList.remove("on");
+          ui.spectatorStatus.classList.remove("on");
+          document.getElementById("mpHangar").classList.remove("on");
+          document.getElementById("changeShipBtn").style.display = "inline-block";
+          document.getElementById("restartBtn").textContent = "Reiniciar missão";
+          ui.start.classList.add("show");
+        }
+
         function moveJoystick(e) {
           if (input.joystickPointer !== e.pointerId) return;
           const rect = ui.joystick.getBoundingClientRect();
@@ -4530,13 +4644,16 @@
         });
         document
           .getElementById("restartBtn")
-          .addEventListener("click", resetGame);
+          .addEventListener("click", () => mp.active ? leaveToStart() : resetGame());
         document
           .getElementById("resumeBtn")
           .addEventListener("click", () => togglePause(false));
         document
           .getElementById("restartFromPauseBtn")
           .addEventListener("click", resetGame);
+        document
+          .getElementById("leaveMatchBtn")
+          .addEventListener("click", leaveToStart);
         ui.soundBtn.addEventListener("click", () => {
           state.sound = !state.sound;
           ui.soundBtn.textContent =
@@ -4553,12 +4670,17 @@
           remoteHpText: document.getElementById("remoteHpText"),
           remoteHpName: document.getElementById("remoteHpName"),
           matchPlayers: document.getElementById("matchPlayers"),
+          hangar: document.getElementById("mpHangar"),
+          hangarPlayers: document.getElementById("mpHangarPlayers"),
+          hangarHint: document.getElementById("mpHangarHint"),
+          hostStartBtn: document.getElementById("hostStartBtn"),
         };
         const mp = {
           active: false, ws: null, playerId: 0, slot: 0,
           remotePlayer: null, remoteShipId: "vanguarda",
           remoteName: "ALIADO", localName: "PILOTO", players: [],
           sendTimer: 0, enemyIdMap: new Map(), connected: false,
+          inHangar: false, localReady: false, isHost: false,
         };
         function mpSetStatus(text, cls) {
           mpUI.mpStatus.textContent = text;
@@ -4585,6 +4707,33 @@
             mpUI.remoteHpName.textContent = remote.name;
             if (mp.remotePlayer) mp.remotePlayer.name = remote.name;
           }
+          renderHangarPlayers(players);
+        }
+
+        function renderHangarPlayers(players) {
+          if (!mp.inHangar) return;
+          const slots = [...players];
+          while (slots.length < 2) slots.push(null);
+          mpUI.hangarPlayers.innerHTML = slots.map((entry, index) => {
+            if (!entry) {
+              return `<div class="hangarPilot"><strong>VAGA ${index + 1}</strong><span>Aguardando piloto...</span></div>`;
+            }
+            const ship = shipById(entry.shipId);
+            return `<div class="hangarPilot ${entry.ready ? "ready" : ""}"><strong>${escapeHTML(entry.name)}${entry.isHost ? " · HOST" : ""}</strong><span style="color:${ship.color}">${ship.icon} ${ship.name}</span><em>${entry.ready ? "PRONTO ✓" : "ESCOLHENDO NAVE"}</em></div>`;
+          }).join("");
+          const local = players.find((entry) => entry.id === mp.playerId);
+          mp.isHost = Boolean(local && local.isHost);
+          mp.localReady = Boolean(local && local.ready);
+          const canStart = players.length === 2 && players.every((entry) => entry.ready);
+          mpUI.hostStartBtn.style.display = mp.isHost ? "inline-block" : "none";
+          mpUI.hostStartBtn.disabled = !canStart;
+          mpUI.hangarHint.textContent = players.length < 2
+            ? "Aguardando o segundo piloto entrar na sala."
+            : canStart
+              ? (mp.isHost ? "Todos prontos. Você pode iniciar a partida." : "Todos prontos. Aguardando o host iniciar.")
+              : "Todos precisam confirmar suas naves antes do início.";
+          const selectButton = ui.shipCards.querySelector(".selectShipBtn");
+          if (selectButton && mp.localReady) selectButton.textContent = "PRONTO ✓";
         }
 
         class NetClient {
@@ -4611,8 +4760,11 @@
               mpClearStatus();
               mpUI.remoteHpWrap.classList.remove("on");
               mpUI.matchPlayers.classList.remove("on");
-              if (mpUI.lobby.classList.contains("show")) {
+              if (mp.inHangar || mpUI.lobby.classList.contains("show")) {
                 mpUI.lobby.classList.remove("show");
+                ui.shipScreen.classList.remove("show");
+                mpUI.hangar.classList.remove("on");
+                mp.inHangar = false;
                 ui.start.classList.add("show");
               }
             };
@@ -4638,15 +4790,19 @@
               case "room:players":
                 renderMatchPlayers(msg.players || []); break;
               case "room:waiting":
+                renderMatchPlayers(msg.players || mp.players);
                 mpSetStatus("AGUARDANDO JOGADOR...", "waiting"); break;
               case "room:full": {
                 mpSetStatus("JOGADOR ENCONTRADO!", "connected");
-                mpUI.lobby.classList.remove("show");
                 renderMatchPlayers(msg.players || []);
                 break;
               }
               case "game:start": {
                 mp.active = true; mp.slot = msg.slot;
+                mp.inHangar = false;
+                cancelAnimationFrame(shipPreviewFrame);
+                ui.shipScreen.classList.remove("show");
+                mpUI.hangar.classList.remove("on");
                 mp.remotePlayer = {
                   x: W * 0.5, y: H * 0.72, tx: W * 0.5, ty: H * 0.72,
                   angle: -Math.PI / 2, tangle: -Math.PI / 2,
@@ -4665,6 +4821,9 @@
                 resetGame();
                 break;
               }
+              case "game:start-denied":
+                showToast(msg.reason || "A partida ainda não pode iniciar.");
+                break;
               case "remote:state": {
                 if (!mp.remotePlayer) break;
                 const d = msg.data;
@@ -4789,7 +4948,7 @@
         const net = new NetClient();
 
         function mpSendState(dt) {
-          if (!mp.active || !mp.connected || !player) return;
+          if (!mp.active || !mp.connected || !player || state.spectating) return;
           mp.sendTimer -= dt;
           if (mp.sendTimer > 0) return;
           mp.sendTimer = 1 / 20;
@@ -4808,6 +4967,7 @@
 
         const _origFirePlayer = firePlayer;
         firePlayer = function() {
+          if (state.spectating) return;
           _origFirePlayer();
           if (!mp.active || !mp.connected) return;
           const count = player.multishot, bData = [];
@@ -4822,6 +4982,7 @@
 
         const _origActivateSpecial = activateSpecial;
         activateSpecial = function() {
+          if (state.spectating) return;
           _origActivateSpecial();
           if (mp.active && mp.connected)
             net.send({ type: "special", data: { x: player.x, y: player.y, refW: W, refH: H, shipId: selectedShip.id } });
@@ -4830,7 +4991,7 @@
         const _origDamageEnemy = damageEnemy;
         damageEnemy = function(e, amount, crit) {
           _origDamageEnemy(e, amount, crit);
-          if (mp.active && mp.connected && e._netId !== undefined)
+          if (mp.active && mp.connected && !state.spectating && e._netId !== undefined)
             net.send({ type: "enemy:damage", enemyId: e._netId, amount, crit: crit || false });
         };
 
@@ -4838,7 +4999,7 @@
         killEnemy = function(e) {
           const nid = e._netId;
           _origKillEnemy(e);
-          if (mp.active && mp.connected && nid !== undefined)
+          if (mp.active && mp.connected && !state.spectating && nid !== undefined)
             net.send({ type: "enemy:killed", enemyId: nid });
         };
 
@@ -4906,7 +5067,12 @@
           const dt = Math.min(0.033, (now - state.last) / 1000 || 0);
           state.last = now;
           if (mp.active) state.spawnTimer = 999;
-          update(dt); mpSendState(dt); updateRemotePlayer(dt); draw();
+          updateRemotePlayer(dt);
+          if (state.spectating && mp.remotePlayer && mp.remotePlayer.alive && player) {
+            player.x = mp.remotePlayer.x;
+            player.y = mp.remotePlayer.y;
+          }
+          update(dt); mpSendState(dt); draw();
           if (mp.active && mp.remotePlayer && mp.remotePlayer.alive) {
             ctx.save();
             if (state.shake > 0.2) ctx.translate(rand(state.shake, -state.shake), rand(state.shake, -state.shake));
@@ -4919,14 +5085,19 @@
         document.getElementById("onlineBtn").addEventListener("click", () => {
           audio.init();
           getPilotName();
-          ui.start.classList.remove("show");
-          mpUI.lobby.classList.add("show");
+          openShipSelect("multiplayer");
           net.connect();
         });
         document.getElementById("cancelLobbyBtn").addEventListener("click", () => {
           net.disconnect();
           mpUI.lobby.classList.remove("show");
           ui.start.classList.add("show");
+        });
+        document.getElementById("leaveHangarBtn").addEventListener("click", leaveToStart);
+        mpUI.hostStartBtn.addEventListener("click", () => {
+          if (!mp.isHost || mpUI.hostStartBtn.disabled) return;
+          net.send({ type: "game:start-request" });
+          mpSetStatus("INICIANDO PARTIDA...", "connected");
         });
 
         ui.playerName.value = String(storage.get("starforge_name", "PILOTO"));
