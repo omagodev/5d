@@ -472,14 +472,15 @@ class Room {
             Math.random() * Math.max(margin + 1, refH * 0.68 - margin) + margin;
         }
 
-        const enemyData = { id, type, x, y, scale: 1 };
+        const spawnAt = Date.now() + 180;
+        const enemyData = { id, type, x, y, scale: 1, spawnAt };
         this.enemies.set(id, enemyData);
 
         this.broadcast({
           type: "enemy:spawn",
           enemy: enemyData,
           stage: this.stage,
-          spawnAt: Date.now() + 180,
+          spawnAt,
         });
       }
 
@@ -500,6 +501,7 @@ class Room {
         x: 960,
         y: -110,
         scale: 1,
+        spawnAt: Date.now() + 2400,
       };
       this.enemies.set(bossId, bossData);
 
@@ -508,7 +510,7 @@ class Room {
         enemy: bossData,
         stage: this.stage,
         isBoss: true,
-        spawnAt: Date.now() + 2400,
+        spawnAt: bossData.spawnAt,
       });
     }
   }
@@ -551,21 +553,23 @@ class Room {
       });
 
       // Check stage clear
-      if (this.stageKills >= this.targetKills && !this.stageClearTimer) {
-        this.stageClearTimer = 2;
-        // Kill remaining enemies
-        for (const [id] of this.enemies) {
-          this.broadcast({
-            type: "enemy:killed",
-            enemyId: id,
-            killerPlayerId: 0,
-            isBoss: false,
-          });
-        }
-        this.enemies.clear();
-        this.broadcast({ type: "stage:clear", stage: this.stage });
-      }
+      if (this.stageKills >= this.targetKills) this.completeWave();
     }
+  }
+
+  completeWave() {
+    if (this.stageClearTimer > 0 || this.intermission || this.stage % 5 === 0) return;
+    this.stageClearTimer = 2;
+    for (const [id] of this.enemies) {
+      this.broadcast({
+        type: "enemy:killed",
+        enemyId: id,
+        killerPlayerId: 0,
+        isBoss: false,
+      });
+    }
+    this.enemies.clear();
+    this.broadcast({ type: "stage:clear", stage: this.stage });
   }
 
   openBossUpgrade(session) {
@@ -628,6 +632,7 @@ class Room {
         x: 960,
         y: -110,
         scale: 1,
+        spawnAt: Date.now() + 2400,
       };
       this.enemies.set(bossId, bossData);
 
@@ -636,7 +641,7 @@ class Room {
         enemy: bossData,
         stage: this.stage,
         isBoss: true,
-        spawnAt: Date.now() + 2400,
+        spawnAt: bossData.spawnAt,
       });
     }
 
@@ -800,6 +805,29 @@ function handleMessage(session, msg) {
       if (!msg.data || typeof msg.data !== "object") return;
       if (room.stageClearTimer > 0 || room.intermission) return;
       if (Number(msg.data.scene?.[0]) !== room.stage) return;
+      if (room.stage % 5 !== 0) {
+        const liveEnemyIds = new Set(
+          (Array.isArray(msg.data.enemies) ? msg.data.enemies : [])
+            .map((row) => Number(row?.[0]))
+            .filter((id) => id > 0),
+        );
+        const now = Date.now();
+        for (const [id, enemy] of room.enemies) {
+          if (
+            enemy.type !== "boss" &&
+            now > Number(enemy.spawnAt || 0) + 600 &&
+            !liveEnemyIds.has(id)
+          ) {
+            room.enemies.delete(id);
+          }
+        }
+        const reportedKills = clampInteger(msg.data.scene?.[1], 0, room.targetKills);
+        room.stageKills = Math.max(room.stageKills, reportedKills);
+        if (room.stageKills >= room.targetKills) {
+          room.completeWave();
+          return;
+        }
+      }
       room.broadcast(
         { type: "world:state", data: msg.data, serverTime: Date.now() },
         session,

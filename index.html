@@ -3478,7 +3478,14 @@
 
           if (state.stageClearTimer > 0) {
             state.stageClearTimer -= dt;
-            if (state.stageClearTimer <= 0) nextStage();
+            if (state.stageClearTimer <= 0) {
+              if (mp.active) {
+                state.stageClearTimer = 0;
+                mpSetStatus("SINCRONIZANDO PRÓXIMA ONDA...", "waiting");
+              } else {
+                nextStage();
+              }
+            }
           }
 
           if (
