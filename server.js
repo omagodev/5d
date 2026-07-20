@@ -250,6 +250,8 @@ class Room {
     this.bossControllerId = null;
     this.bossReady = new Set();
     this.worldAuthorityId = null;
+    this.seed = 0;
+    this.collectedPickups = new Set();
   }
 
   playersPayload() {
@@ -367,6 +369,7 @@ class Room {
     this.stageClearTimer = 0;
     this.time = 0;
     this.enemies.clear();
+    this.collectedPickups.clear();
     this.lastTick = Date.now();
 
     for (const player of this.players) {
@@ -379,6 +382,8 @@ class Room {
     this.worldAuthorityId = null;
     this.refreshWorldAuthority(true);
     const players = this.playersPayload();
+    this.seed = Math.floor(Math.random() * 0x7fffffff) || 1;
+    const serverTime = Date.now();
 
     // Notify all players to start with the same synchronized snapshot.
     for (let i = 0; i < this.players.length; i++) {
@@ -387,8 +392,8 @@ class Room {
         slot: i,
         players,
         stage: this.stage,
-        seed: Math.floor(Math.random() * 999999),
-        serverTime: Date.now(),
+        seed: this.seed,
+        serverTime,
       });
     }
 
@@ -803,6 +808,7 @@ function handleMessage(session, msg) {
       const room = session.room;
       if (!room || !room.running || room.worldAuthorityId !== session.id) return;
       if (!msg.data || typeof msg.data !== "object") return;
+      if (Array.isArray(msg.data.pickups) && msg.data.pickups.length > 1200) return;
       if (room.stageClearTimer > 0 || room.intermission) return;
       if (Number(msg.data.scene?.[0]) !== room.stage) return;
       if (room.stage % 5 !== 0) {
@@ -832,6 +838,24 @@ function handleMessage(session, msg) {
         { type: "world:state", data: msg.data, serverTime: Date.now() },
         session,
       );
+      break;
+    }
+
+    case "pickup:collected": {
+      const room = session.room;
+      if (!room || !room.running || room.worldAuthorityId !== session.id) return;
+      const pickupId = String(msg.pickupId ?? "").slice(0, 64);
+      const playerId = clampInteger(msg.playerId, 1, Number.MAX_SAFE_INTEGER);
+      const collector = room.players.find((player) => player.id === playerId && player.alive);
+      if (!pickupId || !collector || room.collectedPickups.has(pickupId)) return;
+      room.collectedPickups.add(pickupId);
+      if (room.collectedPickups.size > 5000) room.collectedPickups.clear();
+      room.broadcast({
+        type: "pickup:collected",
+        pickupId,
+        playerId,
+        value: clampInteger(msg.value, 1, 10_000),
+      });
       break;
     }
 

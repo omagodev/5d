@@ -541,13 +541,26 @@
       }
       #startScreen .panel {
         max-height: 96vh;
-        overflow: auto;
+        overflow-x: hidden;
+        overflow-y: auto;
         padding-block: clamp(22px, 4vh, 42px);
+        scrollbar-width: none;
+        touch-action: pan-y;
       }
+      #startScreen .panel::-webkit-scrollbar { display: none; }
       #startScreen .nameRow { margin-top: 14px; }
       #startScreen .actions, #startScreen .controls { margin-top: 18px; }
-      #rankScreen .panel { max-height: 94vh; overflow: auto; }
-      #shipScreen .panel { max-height: 96vh; overflow: auto; }
+      #rankScreen .panel,
+      #shipScreen .panel {
+        overflow-x: hidden;
+        overflow-y: auto;
+        scrollbar-width: none;
+        touch-action: pan-y;
+      }
+      #rankScreen .panel { max-height: 94vh; }
+      #shipScreen .panel { max-height: 96vh; }
+      #rankScreen .panel::-webkit-scrollbar,
+      #shipScreen .panel::-webkit-scrollbar { display: none; }
       .shipCard {
         display: grid;
         grid-template-columns: minmax(240px, 0.9fr) minmax(280px, 1.1fr);
@@ -1407,6 +1420,25 @@
 
         const rand = (a = 1, b = 0) => b + Math.random() * (a - b);
         const randi = (a, b = 0) => Math.floor(rand(a, b));
+        const visualStartedAt = performance.now();
+        function seededRng(seed) {
+          let value = Number(seed) >>> 0;
+          return () => {
+            value = (value + 0x6d2b79f5) | 0;
+            let mixed = Math.imul(value ^ (value >>> 15), 1 | value);
+            mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), 61 | mixed);
+            return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
+          };
+        }
+        function seededUnit(seed) {
+          return seededRng(seed)();
+        }
+        function visualWorldTime() {
+          if (mp.active && mp.worldStartedAt) {
+            return Math.max(0, (Date.now() + mp.clockOffset - mp.worldStartedAt) / 1000);
+          }
+          return (performance.now() - visualStartedAt) / 1000;
+        }
         const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
         const lerp = (a, b, t) => a + (b - a) * t;
         const dist2 = (a, b) => {
@@ -1450,12 +1482,16 @@
 
         function buildStars() {
           const count = Math.floor((W * H) / 5600);
+          const random = mp.active && mp.worldSeed
+            ? seededRng(mp.worldSeed ^ 0x51f15e)
+            : Math.random;
           stars = Array.from({ length: count }, () => ({
-            x: Math.random() * W,
-            y: Math.random() * H,
-            z: rand(1, 0.18),
-            s: rand(2.2, 0.45),
-            tw: Math.random() * TAU,
+            xRatio: random(),
+            yRatio: random(),
+            z: 0.18 + random() * 0.82,
+            s: 0.45 + random() * 1.75,
+            tw: random() * TAU,
+            seed: Math.floor(random() * 0x7fffffff),
           }));
         }
 
@@ -2097,36 +2133,41 @@
         const parallax = { index: 0, prev: 0, blend: 1, layers: [[], [], []] };
         const LAYER_SPEED = [14, 34, 70];
 
-        function makeProp(biome, layer) {
+        function makeProp(biome, layer, random = Math.random) {
           const depth = [0.5, 0.8, 1.15][layer];
+          const randomRange = (a = 1, b = 0) => b + random() * (a - b);
           const p = {
-            x: Math.random() * W,
-            y: Math.random() * H,
-            rot: Math.random() * TAU,
-            spin: rand(0.25, -0.25),
+            xRatio: random(),
+            yRatio: random(),
+            rot: random() * TAU,
+            spin: randomRange(0.25, -0.25),
             type: biome.props.type,
             color: biome.props.color,
             r: 0,
             verts: null,
             feature: false,
+            seed: Math.floor(random() * 0x7fffffff),
           };
           if (p.type === "asteroid") {
-            p.r = rand(26, 8) * depth;
-            const n = randi(9, 6);
+            p.r = randomRange(26, 8) * depth;
+            const n = Math.floor(randomRange(9, 6));
             p.verts = Array.from({ length: n }, (_, i) => ({
               a: (i * TAU) / n,
-              m: rand(1.15, 0.7),
+              m: randomRange(1.15, 0.7),
             }));
           } else if (p.type === "crystal") {
-            p.r = rand(30, 10) * depth;
+            p.r = randomRange(30, 10) * depth;
           } else {
-            p.r = rand(190, 70) * depth;
+            p.r = randomRange(190, 70) * depth;
           }
           return p;
         }
         function buildParallax() {
           const biome = BIOMES[parallax.index];
           for (let l = 0; l < 3; l++) {
+            const random = mp.active && mp.worldSeed
+              ? seededRng(mp.worldSeed ^ Math.imul(parallax.index + 1, 0x45d9f3b) ^ Math.imul(l + 1, 0x27d4eb2d))
+              : Math.random;
             const count = Math.max(
               2,
               Math.round(
@@ -2134,21 +2175,26 @@
               ),
             );
             parallax.layers[l] = Array.from({ length: count }, () =>
-              makeProp(biome, l),
+              makeProp(biome, l, random),
             );
           }
           if (biome.extra) {
-            const f = makeProp(biome, 0);
+            const featureRandom = mp.active && mp.worldSeed
+              ? seededRng(mp.worldSeed ^ Math.imul(parallax.index + 1, 0x165667b1) ^ 0x7f4a7c15)
+              : Math.random;
+            const featureRange = (a = 1, b = 0) => b + featureRandom() * (a - b);
+            const f = makeProp(biome, 0, featureRandom);
             f.feature = biome.extra;
             f.color = biome.planet || biome.glow;
             if (biome.extra === "sun") {
               f.r = Math.max(W, H) * 0.5;
-              f.x = W * rand(0.85, 0.15);
-              f.y = -f.r * 0.55;
+              f.xRatio = featureRange(0.85, 0.15);
+              f.yRatio = 0;
+              f.yOffset = -f.r * 0.55;
             } else {
-              f.r = rand(130, 60);
-              f.x = W * rand(0.85, 0.15);
-              f.y = rand(H * 0.5, 40);
+              f.r = featureRange(130, 60);
+              f.xRatio = featureRange(0.85, 0.15);
+              f.yRatio = featureRange(0.5, 40 / Math.max(1, H));
             }
             parallax.layers[0].push(f);
           }
@@ -2161,48 +2207,46 @@
         }
         function drawParallaxLayer(l, t) {
           const items = parallax.layers[l];
-          const dy = LAYER_SPEED[l] / 60;
+          const worldTime = visualWorldTime();
           ctx.save();
           for (const p of items) {
+            const speedFactor = p.feature ? 0.25 : p.type === "cloud" ? 0.7 : 1;
+            const rawY = (p.yOffset ?? p.yRatio * H) + LAYER_SPEED[l] * worldTime * speedFactor;
+            const threshold = H + 40 + p.r;
+            const span = H + p.r * 2 + (p.feature ? 360 : 260);
+            const wraps = p.feature === "sun" || rawY <= threshold
+              ? 0
+              : Math.ceil((rawY - threshold) / span);
+            const px = (wraps > 0 ? seededUnit(p.seed ^ Math.imul(wraps, 0x9e3779b1)) : p.xRatio) * W;
+            const py = p.feature === "sun" ? (p.yOffset ?? 0) : rawY - wraps * span;
+            const rotation = p.rot + p.spin * worldTime;
             if (p.feature === "sun") {
               /* o sol permanece ancorado no horizonte */
-            } else if (p.feature) {
-              p.y += dy * 0.25;
-            } else {
-              p.y += dy * (p.type === "cloud" ? 0.7 : 1);
-              p.rot += p.spin / 60;
-            }
-            if (!p.feature && p.y - p.r > H + 40) {
-              p.y = -p.r - rand(220, 30);
-              p.x = Math.random() * W;
-            } else if (p.feature === "planet" && p.y - p.r > H + 60) {
-              p.y = -p.r - rand(300, 120);
-              p.x = W * rand(0.85, 0.15);
             }
             if (p.type === "cloud" && !p.feature) {
               ctx.globalCompositeOperation = "screen";
-              const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r);
+              const g = ctx.createRadialGradient(px, py, 0, px, py, p.r);
               g.addColorStop(0, rgba(p.color, 0.1 * t));
               g.addColorStop(1, "rgba(0,0,0,0)");
               ctx.fillStyle = g;
-              ctx.fillRect(p.x - p.r, p.y - p.r, p.r * 2, p.r * 2);
+              ctx.fillRect(px - p.r, py - p.r, p.r * 2, p.r * 2);
               ctx.globalCompositeOperation = "source-over";
             } else if (p.feature === "sun") {
               ctx.globalCompositeOperation = "screen";
-              const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r);
+              const g = ctx.createRadialGradient(px, py, 0, px, py, p.r);
               g.addColorStop(0, rgba(p.color, 0.5 * t));
               g.addColorStop(0.3, rgba(p.color, 0.14 * t));
               g.addColorStop(1, "rgba(0,0,0,0)");
               ctx.fillStyle = g;
-              ctx.fillRect(p.x - p.r, p.y - p.r, p.r * 2, p.r * 2);
+              ctx.fillRect(px - p.r, py - p.r, p.r * 2, p.r * 2);
               ctx.globalCompositeOperation = "source-over";
             } else if (p.feature === "planet") {
               const g = ctx.createRadialGradient(
-                p.x - p.r * 0.35,
-                p.y - p.r * 0.35,
+                px - p.r * 0.35,
+                py - p.r * 0.35,
                 p.r * 0.1,
-                p.x,
-                p.y,
+                px,
+                py,
                 p.r,
               );
               g.addColorStop(
@@ -2213,19 +2257,19 @@
               g.addColorStop(1, rgba(mixc(p.color, [0, 0, 0], 0.7), 0.85 * t));
               ctx.fillStyle = g;
               ctx.beginPath();
-              ctx.arc(p.x, p.y, p.r, 0, TAU);
+              ctx.arc(px, py, p.r, 0, TAU);
               ctx.fill();
               ctx.globalCompositeOperation = "screen";
               ctx.strokeStyle = rgba(p.color, 0.35 * t);
               ctx.lineWidth = 2;
               ctx.beginPath();
-              ctx.arc(p.x, p.y, p.r + 2, 0, TAU);
+              ctx.arc(px, py, p.r + 2, 0, TAU);
               ctx.stroke();
               ctx.globalCompositeOperation = "source-over";
             } else if (p.type === "asteroid") {
               ctx.save();
-              ctx.translate(p.x, p.y);
-              ctx.rotate(p.rot);
+              ctx.translate(px, py);
+              ctx.rotate(rotation);
               ctx.globalAlpha = (0.28 + l * 0.18) * t;
               ctx.fillStyle = rgba(mixc(p.color, [0, 0, 0], 0.45));
               ctx.strokeStyle = rgba(p.color, 0.5);
@@ -2243,8 +2287,8 @@
               ctx.globalAlpha = 1;
             } else if (p.type === "crystal") {
               ctx.save();
-              ctx.translate(p.x, p.y);
-              ctx.rotate(p.rot);
+              ctx.translate(px, py);
+              ctx.rotate(rotation);
               ctx.globalAlpha = (0.3 + l * 0.2) * t;
               ctx.globalCompositeOperation = "screen";
               ctx.fillStyle = rgba(p.color, 0.5);
@@ -2564,7 +2608,7 @@
             player.maxShield,
             player.shield + player.maxShield * 0.25,
           );
-          if (state.stage % 5 === 0) {
+          if (!mp.active && state.stage % 5 === 0) {
             spawnQueue.push({ t: 2.4, fn: spawnBoss });
           }
         }
@@ -2635,7 +2679,8 @@
           );
           shock(e.x, e.y, e.color, e.boss ? 300 : 70, e.boss ? 0.9 : 0.35);
 
-          if (e.type === "splitter") {
+          const controlsWorldDrops = !mp.active || mp.isAuthority;
+          if (controlsWorldDrops && e.type === "splitter") {
             for (let i = 0; i < 3; i++)
               spawnEnemy(
                 "shard",
@@ -2645,23 +2690,26 @@
               );
           }
 
-          const orbCount = e.boss ? 34 : Math.max(1, Math.round(e.value / 12));
-          for (let i = 0; i < orbCount; i++) {
-            const xpValue = e.boss ? 8 : Math.max(2, Math.round(e.value / 8));
-            const ejectA =
-              Math.atan2(e.y - player.y, e.x - player.x) + rand(0.72, -0.72);
-            const ejectSpeed = e.boss ? rand(330, 220) : rand(285, 185);
-            pickups.push({
-              x: e.x + rand(18, -18),
-              y: e.y + rand(18, -18),
-              vx: Math.cos(ejectA) * ejectSpeed,
-              vy: Math.sin(ejectA) * ejectSpeed,
-              r: e.boss ? 5 : 4,
-              value: xpValue,
-              life: 13,
-              collectDelay: 0.48,
-              phase: Math.random() * TAU,
-            });
+          if (controlsWorldDrops) {
+            const orbCount = e.boss ? 34 : Math.max(1, Math.round(e.value / 12));
+            for (let i = 0; i < orbCount; i++) {
+              const xpValue = e.boss ? 8 : Math.max(2, Math.round(e.value / 8));
+              const ejectA =
+                Math.atan2(e.y - player.y, e.x - player.x) + rand(0.72, -0.72);
+              const ejectSpeed = e.boss ? rand(330, 220) : rand(285, 185);
+              pickups.push({
+                _netId: mp.active ? `${mp.playerId}:${Math.abs(mp.localPickupSeq--)}` : undefined,
+                x: e.x + rand(18, -18),
+                y: e.y + rand(18, -18),
+                vx: Math.cos(ejectA) * ejectSpeed,
+                vy: Math.sin(ejectA) * ejectSpeed,
+                r: e.boss ? 5 : 4,
+                value: xpValue,
+                life: 13,
+                collectDelay: 0.48,
+                phase: Math.random() * TAU,
+              });
+            }
           }
 
           if (e.boss) {
@@ -2992,8 +3040,10 @@
         }
 
         function dropBossCores(e, count = 2) {
+          if (mp.active && !mp.isAuthority) return;
           for (let i = 0; i < count; i++) {
             pickups.push({
+              _netId: mp.active ? `${mp.playerId}:${Math.abs(mp.localPickupSeq--)}` : undefined,
               x: e.x + rand(36, -36),
               y: e.y + rand(30, -10),
               vx: rand(210, -210),
@@ -3489,6 +3539,7 @@
           }
 
           if (
+            !mp.active &&
             !state.bossActive &&
             state.stage % 5 !== 0 &&
             !state.stageClearTimer
@@ -3942,20 +3993,53 @@
             p.vx *= Math.pow(0.08, dt);
             p.vy *= Math.pow(0.08, dt);
 
-            let dx = player.x - p.x,
-              dy = player.y - p.y,
-              d = Math.hypot(dx, dy) || 1;
-            const attractionRadius = Math.max(115, player.pickupRadius);
+            // No multiplayer, apenas a autoridade do mundo move e coleta os
+            // núcleos. O outro cliente recebe as posições pelo snapshot.
+            if (mp.active && !mp.isAuthority) {
+              p.x += p.vx * dt;
+              p.y += p.vy * dt;
+              continue;
+            }
+
+            const collectors = [{
+              id: mp.active ? mp.playerId : 0,
+              entity: player,
+              pickupRadius: player.pickupRadius,
+              magnet: player.magnet,
+            }];
+            if (mp.active && mp.remotePlayer?.alive) {
+              collectors.push({
+                id: mp.players.find((entry) => entry.id !== mp.playerId)?.id || 0,
+                entity: mp.remotePlayer,
+                pickupRadius: mp.remotePlayer.pickupRadius || 85,
+                magnet: mp.remotePlayer.magnet || 0,
+              });
+            }
+
+            let target = collectors[0];
+            let dx = target.entity.x - p.x;
+            let dy = target.entity.y - p.y;
+            let d = Math.hypot(dx, dy) || 1;
+            for (const candidate of collectors.slice(1)) {
+              const candidateDistance = Math.hypot(candidate.entity.x - p.x, candidate.entity.y - p.y) || 1;
+              if (candidateDistance < d) {
+                target = candidate;
+                d = candidateDistance;
+                dx = candidate.entity.x - p.x;
+                dy = candidate.entity.y - p.y;
+              }
+            }
+            const attractionRadius = Math.max(115, target.pickupRadius);
 
             // Ao se aproximar, o coletável trava na nave e acelera até ela.
             if (p.collectDelay <= 0 && d < attractionRadius) {
               const proximity = 1 - d / attractionRadius;
               const force =
-                280 + (620 + player.magnet * 300) * proximity * proximity;
+                280 + (620 + target.magnet * 300) * proximity * proximity;
               p.vx += (dx / d) * force * dt;
               p.vy += (dy / d) * force * dt;
 
-              const maxSpeed = 390 + player.magnet * 125 + proximity * 460;
+              const maxSpeed = 390 + target.magnet * 125 + proximity * 460;
               const speed = Math.hypot(p.vx, p.vy);
               if (speed > maxSpeed) {
                 p.vx = (p.vx / speed) * maxSpeed;
@@ -3965,22 +4049,25 @@
 
             p.x += p.vx * dt;
             p.y += p.vy * dt;
-            dx = player.x - p.x;
-            dy = player.y - p.y;
+            dx = target.entity.x - p.x;
+            dy = target.entity.y - p.y;
             d = Math.hypot(dx, dy) || 1;
 
             // Todo núcleo fornece experiência para a evolução da nave.
-            if (p.collectDelay <= 0 && d < player.r + p.r + 13) {
+            if (p.collectDelay <= 0 && d < (target.entity.r || 16) + p.r + 13) {
               p.life = 0;
-              gainXP(p.value);
-              addText(
-                player.x,
-                player.y - 24,
-                "+" + Math.round(p.value) + " XP",
-                "#ffd36b",
-                11,
-              );
-              burst(p.x, p.y, "#ffd36b", 6, 105, 2.6, 0.32);
+              if (mp.active) {
+                net.send({
+                  type: "pickup:collected",
+                  pickupId: p._netId,
+                  playerId: target.id,
+                  value: p.value,
+                });
+              } else {
+                gainXP(p.value);
+                addText(player.x, player.y - 24, "+" + Math.round(p.value) + " XP", "#ffd36b", 11);
+                burst(p.x, p.y, "#ffd36b", 6, 105, 2.6, 0.32);
+              }
             }
           }
           pickups = pickups.filter((p) => p.life > 0);
@@ -4091,6 +4178,7 @@
 
         function drawBackground() {
           parallax.blend = Math.min(1, parallax.blend + 0.35 / 60);
+          const worldTime = visualWorldTime();
           const A = BIOMES[parallax.prev];
           const B = BIOMES[parallax.index];
           const t = parallax.blend;
@@ -4115,8 +4203,8 @@
           ctx.save();
           ctx.globalCompositeOperation = "screen";
           const ng = ctx.createRadialGradient(
-            W * (0.48 + 0.15 * Math.sin(state.time * 0.025)),
-            H * (0.35 + 0.1 * Math.cos(state.time * 0.018)),
+            W * (0.48 + 0.15 * Math.sin(worldTime * 0.025)),
+            H * (0.35 + 0.1 * Math.cos(worldTime * 0.018)),
             0,
             W * 0.5,
             H * 0.4,
@@ -4133,16 +4221,17 @@
           drawParallaxLayer(0, t);
 
           for (const s of stars) {
-            s.y += 12 * s.z * (1 / 60);
-            if (s.y > H + 4) {
-              s.y = -4;
-              s.x = Math.random() * W;
-            }
-            const tw = 0.55 + 0.45 * Math.sin(state.time * (1.3 + s.z) + s.tw);
+            const travel = 12 * s.z * worldTime;
+            const wraps = Math.floor((s.yRatio * H + travel) / (H + 8));
+            const y = (s.yRatio * H + travel) % (H + 8) - 4;
+            const xRatio = wraps > 0
+              ? seededUnit(s.seed ^ Math.imul(wraps, 0x9e3779b1))
+              : s.xRatio;
+            const tw = 0.55 + 0.45 * Math.sin(worldTime * (1.3 + s.z) + s.tw);
             ctx.globalAlpha = tw * (0.38 + s.z * 0.55);
             ctx.fillStyle =
               s.z > 0.72 ? "#dffcff" : s.z > 0.42 ? "#9bbfff" : "#6e79a5";
-            ctx.fillRect(s.x, s.y, s.s * s.z, s.s * s.z);
+            ctx.fillRect(xRatio * W, y, s.s * s.z, s.s * s.z);
           }
           ctx.globalAlpha = 1;
 
@@ -4940,7 +5029,8 @@
           isAuthority: false, ownPing: 0, clockOffset: 0,
           pings: new Map(), worldTimer: 0, worldInterval: 1 / 7,
           localEnemySeq: -1, pendingEnemyBullets: [],
-          localBulletSeq: -1,
+          localBulletSeq: -1, localPickupSeq: -1,
+          worldSeed: 0, worldStartedAt: 0,
           spawnTimers: new Map(),
         };
         function mpSetStatus(text, cls) {
@@ -5179,6 +5269,9 @@
                 mp.spawnTimers.clear();
                 mp.remoteScore = 0; mp.remoteKills = 0;
                 mp.worldTimer = 0; mp.localEnemySeq = -1; mp.localBulletSeq = -1;
+                mp.localPickupSeq = -1;
+                mp.worldSeed = Number(msg.seed) >>> 0;
+                mp.worldStartedAt = Number(msg.serverTime) || Date.now();
                 mp.pendingEnemyBullets = [];
                 mp.inHangar = false;
                 cancelAnimationFrame(shipPreviewFrame);
@@ -5192,8 +5285,9 @@
                   name: mp.remoteName,
                   ship: shipById(mp.remoteShipId),
                    afterburn: 0, weaponTier: 0, engineTier: 0, armorTier: 0,
-                  drones: 0, size: 1,
-                  special: { active: 0 }, shield: 0, maxShield: 0,
+                   drones: 0, size: 1,
+                   r: 16, pickupRadius: 85, magnet: 0,
+                   special: { active: 0 }, shield: 0, maxShield: 0,
                 };
                 mpUI.remoteHpWrap.classList.add("on");
                 mpSetStatus("MULTIPLAYER ATIVO", "connected");
@@ -5205,6 +5299,7 @@
                 if (msg.serverTime) mp.clockOffset = Number(msg.serverTime) - Date.now();
                 renderMatchPlayers(msg.players || []);
                 resetGame();
+                buildStars();
                 break;
               }
               case "game:start-denied":
@@ -5225,6 +5320,8 @@
                 mp.remotePlayer.armorTier = d.armorTier || 0;
                 mp.remotePlayer.drones = d.drones || 0;
                 mp.remotePlayer.size = d.size || 1;
+                mp.remotePlayer.pickupRadius = Math.max(85, Number(d.pickupRadius) || 85);
+                mp.remotePlayer.magnet = Math.max(0, Number(d.magnet) || 0);
                 mp.remotePlayer.shield = d.shield || 0;
                 mp.remotePlayer.maxShield = d.maxShield || 0;
                 mp.remoteScore = Math.max(0, Number(d.score) || 0);
@@ -5249,6 +5346,7 @@
                   const bulletIds = enemyBullets.map((bullet) => Number(bullet._netId)).filter((id) => id < 0);
                   mp.localEnemySeq = Math.min(-1, ...enemyIds) - 1;
                   mp.localBulletSeq = Math.min(-1, ...bulletIds) - 1;
+                  mp.localPickupSeq = -1;
                   showToast("Sincronização do mundo transferida para você");
                 }
                 break;
@@ -5331,6 +5429,24 @@
                   }
                 }
                 mp.enemyIdMap.delete(msg.enemyId);
+                break;
+              }
+              case "pickup:collected": {
+                const pickupId = String(msg.pickupId ?? "");
+                pickups = pickups.filter((pickup) => String(pickup._netId) !== pickupId);
+                const collectedByLocal = Number(msg.playerId) === mp.playerId;
+                const collector = collectedByLocal ? player : mp.remotePlayer;
+                if (collectedByLocal && player) gainXP(Math.max(1, Number(msg.value) || 1));
+                if (collector) {
+                  addText(
+                    collector.x,
+                    collector.y - 24,
+                    "+" + Math.round(Number(msg.value) || 1) + " XP",
+                    "#ffd36b",
+                    11,
+                  );
+                  burst(collector.x, collector.y, "#ffd36b", 6, 105, 2.6, 0.32);
+                }
                 break;
               }
               case "stage:next":
@@ -5452,6 +5568,16 @@
               Math.round((bullet.age || 0) * 10) / 10,
             ];
           });
+          const pickupState = pickups.filter((pickup) => pickup.life > 0 && pickup._netId !== undefined).map((pickup) => [
+            pickup._netId,
+            Math.round(pickup.x), Math.round(pickup.y),
+            Math.round(pickup.vx), Math.round(pickup.vy),
+            pickup.r, pickup.value,
+            Math.round(pickup.life * 10) / 10,
+            Math.round((pickup.collectDelay || 0) * 100) / 100,
+            Math.round((pickup.phase || 0) * 1000) / 1000,
+            pickup.bossDrop ? 1 : 0,
+          ]);
           net.send({
             type: "world:state",
             data: {
@@ -5459,6 +5585,7 @@
               ref: [W, H],
               enemies: enemyState,
               bullets: hostileBulletState,
+              pickups: pickupState,
             },
           });
         }
@@ -5512,6 +5639,39 @@
               mp.enemyIdMap.delete(id);
             }
           }
+
+          const pickupById = new Map(
+            pickups
+              .filter((pickup) => pickup._netId !== undefined)
+              .map((pickup) => [String(pickup._netId), pickup]),
+          );
+          const presentPickups = new Set();
+          for (const row of data.pickups || []) {
+            const id = String(row[0]);
+            presentPickups.add(id);
+            let pickup = pickupById.get(id);
+            if (!pickup) {
+              pickup = {
+                _netId: id,
+                x: row[1] * sx, y: row[2] * sy,
+                vx: row[3] * sx, vy: row[4] * sy,
+                r: row[5] || 4, value: row[6] || 1,
+                life: row[7] || 0.1, collectDelay: row[8] || 0,
+                phase: row[9] || 0, bossDrop: Boolean(row[10]),
+              };
+              pickups.push(pickup);
+            } else {
+              pickup.x = lerp(pickup.x, row[1] * sx, .72);
+              pickup.y = lerp(pickup.y, row[2] * sy, .72);
+              pickup.vx = row[3] * sx; pickup.vy = row[4] * sy;
+              pickup.r = row[5] || pickup.r; pickup.value = row[6] || pickup.value;
+              pickup.life = row[7]; pickup.collectDelay = row[8];
+              pickup.phase = row[9]; pickup.bossDrop = Boolean(row[10]);
+            }
+          }
+          pickups = pickups.filter(
+            (pickup) => pickup._netId === undefined || presentPickups.has(String(pickup._netId)),
+          );
 
           const bulletRows = data.bullets || [];
           const bulletById = new Map(enemyBullets.filter((bullet) => bullet._netId !== undefined).map((bullet) => [bullet._netId, bullet]));
@@ -5567,6 +5727,7 @@
             weaponTier: player.weaponTier, engineTier: player.engineTier,
             armorTier: player.armorTier,
             drones: player.drones, size: Math.round(player.size * 100) / 100,
+            pickupRadius: Math.round(player.pickupRadius), magnet: player.magnet,
             shield: Math.ceil(player.shield), maxShield: Math.ceil(player.maxShield),
             score: Math.floor(state.score), kills: state.kills, stage: state.stage,
             special: player.special ? { active: player.special.active } : null,
