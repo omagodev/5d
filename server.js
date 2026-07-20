@@ -23,6 +23,20 @@ const {
 
 const PORT = parseInt(process.env.PORT, 10) || 4050;
 const staticCache = new Map();
+const ENEMY_FAMILY_UNLOCKS = [
+  ["scout", 1], ["zigzag", 1], ["shooter", 1], ["tank", 2], ["splitter", 2],
+  ["charger", 3], ["sniper", 3], ["minelayer", 4], ["leech", 4], ["sentinel", 5],
+];
+const ENEMY_VARIANT_UNLOCKS = [
+  ["mk1", 0], ["overdrive", 3], ["siege", 6], ["phase", 9], ["apex", 12],
+];
+const ENEMY_TYPES = ENEMY_VARIANT_UNLOCKS.flatMap(([variant, variantUnlock]) =>
+  ENEMY_FAMILY_UNLOCKS.map(([family, familyUnlock]) => ({
+    id: `${family}-${variant}`,
+    unlockStage: familyUnlock + variantUnlock,
+  })),
+);
+if (ENEMY_TYPES.length !== 50) throw new Error("Enemy catalog must contain 50 types");
 
 const clampInteger = (value, min, max) =>
   Math.max(min, Math.min(max, Math.floor(Number(value) || 0)));
@@ -444,17 +458,13 @@ class Room {
       aliveCount < cap
     ) {
       const s = this.stage;
-      const pool = ["scout", "scout", "zigzag"];
-      if (s >= 2) pool.push("shooter");
-      if (s >= 3) pool.push("tank");
-      if (s >= 4) pool.push("splitter");
-      if (s >= 7) pool.push("charger");
+      const pool = ENEMY_TYPES.filter((enemy) => enemy.unlockStage <= s);
 
       const willGroup = Math.random() < Math.min(0.42, s * 0.018);
       const groupSize = willGroup ? Math.floor(Math.random() * 3) + 2 : 1;
 
       for (let i = 0; i < groupSize; i++) {
-        const type = pool[Math.floor(Math.random() * pool.length)];
+        const type = pool[Math.floor(Math.random() * pool.length)].id;
         const id = nextEnemyId++;
 
         // Pick spawn position (top/sides, same logic as client)
@@ -498,7 +508,7 @@ class Room {
     if (this.stage % 5 === 0 && this.stageKills === 0 && !this.bossActive) {
       this.bossActive = true;
       const bossId = nextEnemyId++;
-      const kind = Math.floor(this.stage / 5) % 3;
+      const kind = Math.max(0, Math.floor(this.stage / 5) - 1);
       const bossData = {
         id: bossId,
         type: "boss",
@@ -629,7 +639,7 @@ class Room {
     if (this.stage % 5 === 0) {
       this.bossActive = true;
       const bossId = nextEnemyId++;
-      const kind = Math.floor(this.stage / 5) % 3;
+      const kind = Math.max(0, Math.floor(this.stage / 5) - 1);
       const bossData = {
         id: bossId,
         type: "boss",

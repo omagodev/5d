@@ -45,6 +45,16 @@
         height: 100%;
         cursor: crosshair;
       }
+      #game3d,
+      #game {
+        position: fixed;
+        inset: 0;
+      }
+      #game3d { z-index: 0; }
+      #game {
+        z-index: 0;
+        opacity: 0;
+      }
       .layer {
         position: fixed;
         inset: 0;
@@ -1063,6 +1073,7 @@
     </style>
   </head>
   <body>
+    <canvas id="game3d" aria-label="Campo de batalha tridimensional"></canvas>
     <canvas id="game"></canvas>
     <div id="vignette" class="layer"></div>
     <div id="scan" class="layer"></div>
@@ -1311,6 +1322,25 @@
       <div id="matchPlayers"></div>
       <div id="spectatorStatus">MODO ESPECTADOR · ACOMPANHANDO ALIADO</div>
     </div>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./node_modules/three/build/three.module.js",
+          "three/addons/": "./node_modules/three/examples/jsm/"
+        }
+      }
+    </script>
+    <script type="module">
+      import { StarforgeThreeRenderer } from "./three-game.js";
+      try {
+        window.starforge3D = new StarforgeThreeRenderer(document.getElementById("game3d"));
+        window.dispatchEvent(new CustomEvent("starforge3d-ready"));
+      } catch (error) {
+        console.error("Falha ao iniciar a renderização 3D:", error);
+        document.getElementById("game").style.opacity = "1";
+      }
+    </script>
 
     <script>
       (() => {
@@ -1914,113 +1944,13 @@
         let shipPreviewRotation = 0;
         function drawShipPreview(canvas, ship) {
           cancelAnimationFrame(shipPreviewFrame);
-          const previewCtx = canvas.getContext("2d");
-          const specs = {
-            vanguarda: { wing: 72, body: 78, width: 25 },
-            colosso: { wing: 84, body: 70, width: 38 },
-            espectro: { wing: 59, body: 92, width: 18 },
-            tempestade: { wing: 80, body: 75, width: 28 },
+          const mount = () => {
+            if (canvas.isConnected && window.starforge3D) {
+              window.starforge3D.mountShipPreview(canvas, ship);
+            }
           };
-          const spec = specs[ship.id];
-          let last = performance.now();
-          const paint = (now) => {
-            const dpr = Math.min(2, devicePixelRatio || 1);
-            const w = canvas.clientWidth || 320;
-            const h = canvas.clientHeight || 260;
-            if (canvas.width !== Math.floor(w * dpr) || canvas.height !== Math.floor(h * dpr)) {
-              canvas.width = Math.floor(w * dpr);
-              canvas.height = Math.floor(h * dpr);
-            }
-            previewCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-            previewCtx.clearRect(0, 0, w, h);
-            const dt = Math.min(0.04, (now - last) / 1000);
-            last = now;
-            shipPreviewRotation += dt * 0.62;
-            const yaw = shipPreviewRotation;
-            const face = Math.cos(yaw);
-            const side = 0.18 + Math.abs(face) * 0.82;
-            const cx = w / 2;
-            const cy = h / 2 - 4;
-
-            previewCtx.save();
-            previewCtx.globalAlpha = 0.24;
-            previewCtx.strokeStyle = ship.color;
-            previewCtx.lineWidth = 1;
-            for (let r = 40; r < Math.max(w, h); r += 38) {
-              previewCtx.beginPath();
-              previewCtx.ellipse(cx, cy + 72, r, r * 0.22, 0, 0, TAU);
-              previewCtx.stroke();
-            }
-            previewCtx.restore();
-
-            previewCtx.save();
-            previewCtx.translate(cx + Math.sin(yaw) * 9, cy);
-            previewCtx.scale(side, 1);
-            const glow = previewCtx.createRadialGradient(0, 20, 3, 0, 20, 105);
-            glow.addColorStop(0, ship.color + "aa");
-            glow.addColorStop(1, "transparent");
-            previewCtx.fillStyle = glow;
-            previewCtx.fillRect(-120, -90, 240, 210);
-
-            previewCtx.fillStyle = face >= 0 ? "#263b63" : "#17243f";
-            previewCtx.strokeStyle = ship.color;
-            previewCtx.lineWidth = 2.4 / side;
-            previewCtx.shadowBlur = 18;
-            previewCtx.shadowColor = ship.color;
-            const previewShape = ship.id === "colosso"
-              ? [[-36,-54],[36,-54],[61,-28],[72,36],[38,55],[18,38],[-18,38],[-38,55],[-72,36],[-61,-28]]
-              : ship.id === "espectro"
-                ? [[0,-96],[13,-18],[56,42],[18,25],[7,68],[0,47],[-7,68],[-18,25],[-56,42],[-13,-18]]
-                : ship.id === "tempestade"
-                  ? [[-24,-76],[-5,-31],[0,-12],[5,-31],[24,-76],[43,-18],[70,42],[28,31],[0,65],[-28,31],[-70,42],[-43,-18]]
-                  : [[0,-78],[25,-24],[72,38],[26,27],[0,66],[-26,27],[-72,38],[-25,-24]];
-            previewCtx.beginPath();
-            previewCtx.moveTo(previewShape[0][0], previewShape[0][1]);
-            for (let i = 1; i < previewShape.length; i++) {
-              previewCtx.lineTo(previewShape[i][0], previewShape[i][1]);
-            }
-            previewCtx.closePath();
-            previewCtx.fill();
-            previewCtx.stroke();
-
-            const hull = previewCtx.createLinearGradient(-spec.width, 0, spec.width, 0);
-            hull.addColorStop(0, face >= 0 ? "#38527c" : "#18243b");
-            hull.addColorStop(.48, face >= 0 ? "#d9f7ff" : "#53637d");
-            hull.addColorStop(1, "#24375e");
-            previewCtx.fillStyle = hull;
-            previewCtx.shadowBlur = 0;
-            previewCtx.beginPath();
-            previewCtx.moveTo(0, -spec.body);
-            previewCtx.lineTo(spec.width, 2);
-            previewCtx.lineTo(0, 56);
-            previewCtx.lineTo(-spec.width, 2);
-            previewCtx.closePath();
-            previewCtx.fill();
-
-            previewCtx.fillStyle = ship.color;
-            previewCtx.shadowBlur = 16;
-            previewCtx.shadowColor = ship.color;
-            previewCtx.beginPath();
-            previewCtx.ellipse(0, face >= 0 ? -18 : 23, Math.max(5, spec.width * .35), 20, 0, 0, TAU);
-            previewCtx.fill();
-            previewCtx.fillStyle = "#dffcff";
-            previewCtx.globalAlpha = .75;
-            previewCtx.fillRect(-spec.wing - 3, 28, 6, 22);
-            previewCtx.fillRect(spec.wing - 3, 28, 6, 22);
-            previewCtx.restore();
-
-            previewCtx.save();
-            previewCtx.globalAlpha = .65;
-            previewCtx.fillStyle = ship.color;
-            previewCtx.shadowBlur = 22;
-            previewCtx.shadowColor = ship.color;
-            previewCtx.beginPath();
-            previewCtx.ellipse(cx, cy + 84, 54 * side, 8, 0, 0, TAU);
-            previewCtx.fill();
-            previewCtx.restore();
-            shipPreviewFrame = requestAnimationFrame(paint);
-          };
-          shipPreviewFrame = requestAnimationFrame(paint);
+          if (window.starforge3D) mount();
+          else window.addEventListener("starforge3d-ready", mount, { once: true });
         }
         function changeShipPreview(delta) {
           shipCarouselIndex = (shipCarouselIndex + delta + SHIPS.length) % SHIPS.length;
@@ -2530,14 +2460,59 @@
           return 1 + Math.sin(progress * Math.PI * 7) * (1 - progress) * 0.075;
         }
 
+        const ENEMY_FAMILIES = [
+          { id: "scout", unlock: 1, hp: 22, r: 12, speed: 96, value: 10, movement: "pursuit", names: ["Vespa de Íon", "Agulha Cobalto", "Rapina Prismática", "Espectro Veloz", "Alfa Celeste"], colors: ["#45e9ff", "#368cff", "#a66cff", "#48ffd0", "#fff06a"], weapons: ["none", "aimed", "burst", "homing", "fan"] },
+          { id: "zigzag", unlock: 1, hp: 36, r: 14, speed: 84, value: 16, movement: "weave", names: ["Serpente Violeta", "Cortante Rúnico", "Dardo Fantasma", "Naja Quântica", "Dançarino do Vazio"], colors: ["#a77dff", "#d45cff", "#6f8cff", "#ff73d5", "#d9a4ff"], weapons: ["none", "aimed", "burst", "cross", "homing"] },
+          { id: "shooter", unlock: 1, hp: 54, r: 15, speed: 60, value: 22, movement: "orbit", names: ["Artilheiro Rosa", "Corsário Laser", "Canhoneira Rubra", "Oráculo Bélico", "Dominador de Pulso"], colors: ["#ff69d4", "#ff4f9a", "#ff6d63", "#d86cff", "#ffb04d"], weapons: ["aimed", "burst", "spread", "homing", "fan"] },
+          { id: "tank", unlock: 2, hp: 148, r: 23, speed: 36, value: 42, movement: "bulwark", names: ["Bastião Âmbar", "Couraçado Ferrugem", "Muralha Vulcânica", "Monólito de Cerco", "Fortaleza Ômega"], colors: ["#ffb85c", "#e88955", "#ff6d48", "#d9a45f", "#ffd06b"], weapons: ["spread", "fan", "cross", "ring", "heavy"] },
+          { id: "splitter", unlock: 2, hp: 74, r: 18, speed: 54, value: 28, movement: "weave", names: ["Célula Esmeralda", "Matriz Bipartida", "Colmeia Fractal", "Núcleo Replicante", "Enxame Primordial"], colors: ["#7cff9f", "#42e889", "#7affd8", "#b1ff62", "#e0ff70"], weapons: ["none", "aimed", "mine", "ring", "homing"] },
+          { id: "charger", unlock: 3, hp: 90, r: 17, speed: 64, value: 35, movement: "charger", names: ["Lanceiro Carmesim", "Aríete Escarlate", "Cometa Sangrento", "Predador Cinético", "Executor Rubro"], colors: ["#ff667a", "#ff3f62", "#ff7847", "#ff3da8", "#ffb13d"], weapons: ["none", "aimed", "burst", "spread", "fan"] },
+          { id: "sniper", unlock: 3, hp: 48, r: 13, speed: 68, value: 30, movement: "sniper", names: ["Olho do Abismo", "Atirador Neônico", "Mirante Espectral", "Vigia de Fótons", "Juiz de Longo Alcance"], colors: ["#70a4ff", "#44d8ff", "#b576ff", "#61ffe5", "#ffdf62"], weapons: ["sniper", "sniper", "burst", "homing", "fan"] },
+          { id: "minelayer", unlock: 4, hp: 82, r: 19, speed: 48, value: 34, movement: "minelayer", names: ["Tecelão de Minas", "Jardineiro Sombrio", "Semeador de Plasma", "Arquiteto de Armadilhas", "Labirinto Vivo"], colors: ["#c276ff", "#805cff", "#ff66ce", "#55d9ff", "#ffc857"], weapons: ["mine", "mine", "cross", "ring", "homing"] },
+          { id: "leech", unlock: 4, hp: 68, r: 16, speed: 76, value: 31, movement: "leech", names: ["Sanguessuga Solar", "Parasita de Casco", "Devorador de Escudo", "Fome Astral", "Ceifador Vital"], colors: ["#ff9f58", "#ff5656", "#eb4fff", "#ff346d", "#ffd15c"], weapons: ["aimed", "homing", "burst", "mine", "fan"] },
+          { id: "sentinel", unlock: 5, hp: 112, r: 20, speed: 42, value: 40, movement: "sentinel", names: ["Sentinela Boreal", "Guardião Hexagonal", "Torre de Éter", "Observador Infinito", "Mandala de Guerra"], colors: ["#60f5ff", "#6fa0ff", "#c47aff", "#ff68c8", "#ffe36a"], weapons: ["cross", "spread", "ring", "homing", "fan"] },
+        ];
+        const ENEMY_VARIANTS = [
+          { id: "mk1", unlock: 0, hp: 1, speed: 1, size: 1, value: 1, shield: 1, fire: 1 },
+          { id: "overdrive", unlock: 3, hp: 1.18, speed: 1.2, size: 1.04, value: 1.35, shield: 1.05, fire: 0.82 },
+          { id: "siege", unlock: 6, hp: 1.75, speed: 0.82, size: 1.18, value: 1.7, shield: 1.3, fire: 0.76 },
+          { id: "phase", unlock: 9, hp: 1.35, speed: 1.12, size: 1.08, value: 1.9, shield: 1.65, fire: 0.68 },
+          { id: "apex", unlock: 12, hp: 2.15, speed: 1.18, size: 1.24, value: 2.5, shield: 1.9, fire: 0.54 },
+        ];
+        const ENEMY_ARCHETYPES = ENEMY_VARIANTS.flatMap((variant, variantIndex) =>
+          ENEMY_FAMILIES.map((family) => ({
+            ...family,
+            id: `${family.id}-${variant.id}`,
+            family: family.id,
+            variant: variantIndex,
+            name: family.names[variantIndex],
+            color: family.colors[variantIndex],
+            weapon: family.weapons[variantIndex],
+            unlockStage: family.unlock + variant.unlock,
+            hp: family.hp * variant.hp,
+            r: family.r * variant.size,
+            speed: family.speed * variant.speed,
+            value: Math.round(family.value * variant.value),
+            shieldMult: variant.shield,
+            fireRate: variant.fire,
+          })),
+        );
+        if (ENEMY_ARCHETYPES.length !== 50)
+          throw new Error("Catálogo de inimigos incompleto");
+        const ENEMY_BY_ID = new Map(ENEMY_ARCHETYPES.map((enemy) => [enemy.id, enemy]));
+        function enemyArchetype(type) {
+          if (ENEMY_BY_ID.has(type)) return ENEMY_BY_ID.get(type);
+          const family = ENEMY_FAMILIES.find((entry) => entry.id === type);
+          if (family) return ENEMY_BY_ID.get(`${family.id}-mk1`);
+          if (type === "shard") return { id: "shard", family: "shard", variant: 0, name: "Fragmento", hp: 16, r: 8, speed: 125, value: 5, color: "#8cffc2", weapon: "none", movement: "pursuit", shieldMult: 0.35, fireRate: 1 };
+          return ENEMY_BY_ID.get("scout-mk1");
+        }
+
         function spawnEnemy(forceType = null, x = null, y = null, scale = 1) {
           const s = state.stage;
-          const pool = ["scout", "scout", "zigzag"];
-          if (s >= 2) pool.push("shooter");
-          if (s >= 3) pool.push("tank");
-          if (s >= 4) pool.push("splitter");
-          if (s >= 7) pool.push("charger");
-          const type = forceType || pool[randi(pool.length)];
+          const available = ENEMY_ARCHETYPES.filter((enemy) => enemy.unlockStage <= s);
+          const archetype = enemyArchetype(forceType || available[randi(available.length)].id);
+          const type = archetype.id;
           // Inimigos comuns surgem já dentro da área visível.
           // Usamos principalmente topo e laterais para evitar aparecimento sobre o jogador.
           const side = randi(3);
@@ -2555,38 +2530,36 @@
             }
           }
           const diff = 1 + Math.pow(s, 1.12) * 0.095;
-          const base = {
-            scout: { hp: 22, r: 12, speed: 90, value: 10, color: "#76f7ff" },
-            zigzag: { hp: 38, r: 14, speed: 82, value: 16, color: "#a77dff" },
-            shooter: { hp: 55, r: 15, speed: 58, value: 22, color: "#ff69d4" },
-            tank: { hp: 150, r: 23, speed: 34, value: 42, color: "#ffb85c" },
-            splitter: { hp: 76, r: 18, speed: 52, value: 28, color: "#7cff9f" },
-            charger: { hp: 92, r: 17, speed: 62, value: 35, color: "#ff667a" },
-            shard: { hp: 16, r: 8, speed: 125, value: 5, color: "#8cffc2" },
-          }[type];
-          const hp = base.hp * diff * scale;
+          const hp = archetype.hp * diff * scale;
           // Cada onda aumenta o escudo inimigo. O casco continua escalando separadamente.
           const shieldRatio = Math.min(1.35, 0.1 + (s - 1) * 0.055);
-          const maxShield = hp * shieldRatio;
+          const maxShield = hp * shieldRatio * archetype.shieldMult;
           enemies.push({
             type,
+            family: archetype.family,
+            variant: archetype.variant,
+            enemyName: archetype.name,
+            movement: archetype.movement,
+            weapon: archetype.weapon,
             x,
             y,
             vx: 0,
             vy: 0,
-            r: base.r * scale,
+            r: archetype.r * scale,
             hp,
             maxHp: hp,
             shield: maxShield,
             maxShield,
-            speed: base.speed * (1 + Math.min(0.42, s * 0.012)),
-            value: base.value,
-            color: base.color,
+            speed: archetype.speed * (1 + Math.min(0.42, s * 0.012)),
+            value: archetype.value,
+            color: archetype.color,
             t: Math.random() * 10,
             age: 0,
             spawnRush: rand(2.1, 1.35),
             phase: Math.random() * TAU,
-            fire: rand(2.5, 0.7),
+            fire: rand(2.5, 0.7) * archetype.fireRate,
+            fireRate: archetype.fireRate,
+            contactDamage: (archetype.family === "tank" ? 24 : archetype.family === "leech" ? 20 : 13) * (1 + archetype.variant * 0.13),
             dash: rand(3, 1.3),
             flash: 0,
             shieldFlash: 0,
@@ -2597,18 +2570,46 @@
           });
         }
 
-        const BOSS_NAMES = ["ARCONTE DE ÍON", "SERAFIM DO VÁCUO", "TITÃ SOLAR"];
+        const BOSS_PROFILES = [
+          { name: "ARCONTE DE ÍON", color: "#55efff", arsenal: "ESPIRAL DE SINGULARIDADE", mobility: 0.92, cadence: 1 },
+          { name: "SERAFIM DO VÁCUO", color: "#ff62c8", arsenal: "MÍSSEIS PERSEGUIDORES", mobility: 1.2, cadence: 0.9 },
+          { name: "TITÃ SOLAR", color: "#ffb45e", arsenal: "CHUVA DE CORONAS", mobility: 0.72, cadence: 0.84 },
+          { name: "CRONÓFAGO", color: "#9d7cff", arsenal: "GAIOLA TEMPORAL", mobility: 1.05, cadence: 0.78 },
+          { name: "LEVIATÃ DO ABISMO", color: "#4f8cff", arsenal: "MARÉ DE MINAS", mobility: 0.82, cadence: 0.74 },
+          { name: "MATRIARCA PRISMÁTICA", color: "#ff73e6", arsenal: "FOGO ESPELHADO", mobility: 1.12, cadence: 0.7 },
+          { name: "CATEDRAL DE FERRO", color: "#ff8359", arsenal: "MURALHA DE ANIQUILAÇÃO", mobility: 0.62, cadence: 0.68 },
+          { name: "CEIFADOR DO ECLIPSE", color: "#d855ff", arsenal: "LANÇAS DO HORIZONTE", mobility: 1.34, cadence: 0.64 },
+          { name: "HIDRA QUÂNTICA", color: "#5dffc5", arsenal: "SALVA DE NOVE CABEÇAS", mobility: 1.08, cadence: 0.6 },
+          { name: "FORJA ÔMEGA", color: "#ffe05f", arsenal: "PROTOCOLO DO FIM", mobility: 0.95, cadence: 0.55 },
+        ];
+        function bossProfile(kind) {
+          const safeKind = Math.max(0, Number(kind) || 0);
+          const base = BOSS_PROFILES[safeKind % BOSS_PROFILES.length];
+          const ascension = Math.floor(safeKind / BOSS_PROFILES.length);
+          return {
+            ...base,
+            profile: safeKind % BOSS_PROFILES.length,
+            ascension,
+            name: ascension ? `${base.name} · ASCENSÃO ${ascension + 1}` : base.name,
+            mobility: base.mobility * (1 + ascension * 0.07),
+            cadence: base.cadence * Math.pow(0.91, ascension),
+          };
+        }
 
         function spawnBoss() {
           state.bossActive = true;
           enemyBullets = [];
-          const index = Math.floor(state.stage / 5);
-          const kind = index % 3;
+          const index = Math.max(1, Math.floor(state.stage / 5));
+          const kind = index - 1;
+          const profile = bossProfile(kind);
           const hp = 1500 * Math.pow(1.48, index - 1);
           const maxShield = hp * Math.min(1.4, 0.55 + index * 0.1);
           boss = {
             boss: true,
             kind,
+            bossProfile: profile.profile,
+            bossName: profile.name,
+            arsenal: profile.arsenal,
             x: W / 2,
             y: -110,
             targetY: Math.max(120, H * 0.2),
@@ -2617,7 +2618,7 @@
             maxHp: hp,
             shield: maxShield,
             maxShield,
-            speed: 40,
+            speed: 40 * profile.mobility,
             phase: 0,
             t: 0,
             fire: 0.8,
@@ -2628,7 +2629,7 @@
             patternIndex: 0,
             supplyTimer: 5.5,
             shieldFlash: 0,
-            color: ["#76f7ff", "#ff62c8", "#ffb45e"][kind],
+            color: profile.color,
             dead: false,
             flash: 0,
             rot: 0,
@@ -2636,8 +2637,7 @@
           };
           enemies.push(boss);
           showBanner(
-            "CHEFÃO — " +
-              BOSS_NAMES[kind],
+            `CHEFÃO — ${profile.name} · ${profile.arsenal}`,
           );
           audio.tone(65, 0.7, "sawtooth", 0.16, -18);
           updateUI();
@@ -2671,7 +2671,8 @@
         }
 
         function showBossReport(info = {}) {
-          const kind = Number(info.bossKind ?? Math.floor(state.stage / 5) % 3) % 3;
+          const kind = Math.max(0, Number(info.bossKind ?? Math.floor(state.stage / 5) - 1) || 0);
+          const profile = bossProfile(kind);
           const players = info.players?.length
             ? info.players
             : [{ id: mp.playerId, name: getPilotName(), shipId: selectedShip.id, score: state.score, kills: state.kills }];
@@ -2679,7 +2680,7 @@
           state.pendingBossAdvance = false;
           enemyBullets = [];
           mp.bossControllerId = info.controllerId ?? mp.playerId;
-          ui.bossReportTitle.textContent = BOSS_NAMES[kind] + " DERROTADO";
+          ui.bossReportTitle.textContent = profile.name + " DERROTADO";
           ui.bossReportStage.textContent = info.stage || state.stage;
           ui.bossReportTime.textContent = formatRunTime(info.durationSeconds ?? state.time);
           ui.bossReportScore.textContent = fmt(state.score);
@@ -2732,7 +2733,7 @@
           shock(e.x, e.y, e.color, e.boss ? 300 : 70, e.boss ? 0.9 : 0.35);
 
           const controlsWorldDrops = !mp.active || mp.isAuthority;
-          if (controlsWorldDrops && e.type === "splitter") {
+          if (controlsWorldDrops && e.family === "splitter") {
             for (let i = 0; i < 3; i++)
               spawnEnemy(
                 "shard",
@@ -3045,6 +3046,41 @@
           }
         }
 
+        function fireEnemyWeapon(e, distance, dt) {
+          if (!e.weapon || e.weapon === "none") return;
+          e.fire -= dt;
+          if (e.fire > 0 || distance > 760) return;
+          const base = angleTo(e, player);
+          const variant = e.variant || 0;
+          const speed = 185 + state.stage * 4 + variant * 18;
+          const damage = 7 + state.stage * 0.52 + variant * 1.8;
+          const shot = (angle, shotSpeed = speed, radius = 4, options = {}) =>
+            spawnEnemyBullet(e.x, e.y, angle, shotSpeed, damage, radius, e.color, options);
+          if (e.weapon === "aimed") shot(base);
+          else if (e.weapon === "burst") {
+            for (let i = -1; i <= 1; i++) shot(base + i * 0.075, speed * (1 + Math.abs(i) * 0.08), 4.2);
+          } else if (e.weapon === "spread" || e.weapon === "fan") {
+            const count = e.weapon === "fan" ? 7 : 5;
+            for (let i = 0; i < count; i++) shot(base + (i - (count - 1) / 2) * 0.15, speed * 0.92, 4.4);
+          } else if (e.weapon === "homing") {
+            for (let i = -1; i <= 1; i++) shot(base + i * 0.2, speed * 0.72, 5, { homing: 0.85 + variant * 0.1, homingTime: 1.8, life: 7 });
+          } else if (e.weapon === "sniper") {
+            shot(base, speed * 2.15, 5.2, { accel: 35, life: 4.5 });
+            addText(e.x, e.y + e.r + 12, "DISPARO DE PRECISÃO", e.color, 10);
+          } else if (e.weapon === "mine") {
+            shot(base, 48 + variant * 8, 8, { wave: 0.24, waveSpeed: 2.4, homing: 0.12, homingTime: 4.5, life: 10 });
+          } else if (e.weapon === "ring") {
+            const count = 8 + variant * 2;
+            for (let i = 0; i < count; i++) shot(e.phase + (i * TAU) / count, speed * 0.75, 4.2);
+          } else if (e.weapon === "cross") {
+            for (let i = 0; i < 4; i++) shot(base + (i * Math.PI) / 2, speed * 0.9, 4.7, { wave: 0.1, waveSpeed: 4 });
+          } else if (e.weapon === "heavy") {
+            shot(base, speed * 0.62, 10, { homing: 0.28, homingTime: 2.8, accel: 24, life: 8 });
+          }
+          const baseCadence = { aimed: 2.1, burst: 2.45, spread: 2.8, fan: 3, homing: 3.2, sniper: 3.1, mine: 3.4, ring: 3.5, cross: 3.15, heavy: 3.8 }[e.weapon] || 2.6;
+          e.fire = Math.max(0.48, baseCadence * (e.fireRate || 1) - state.stage * 0.018) * rand(1.12, 0.88);
+        }
+
         function spawnEnemyBullet(
           x,
           y,
@@ -3204,23 +3240,109 @@
           );
         }
 
+        function bossTemporalCage(e, density = 18) {
+          const radius = Math.min(250, Math.max(150, Math.min(W, H) * 0.3));
+          addText(player.x, player.y - 34, "GAIOLA TEMPORAL", e.color, 12);
+          shock(player.x, player.y, e.color, radius, 0.5);
+          for (let i = 0; i < density; i++) {
+            const angle = (i * TAU) / density + e.phase * 0.4;
+            const x = player.x + Math.cos(angle) * radius;
+            const y = player.y + Math.sin(angle) * radius;
+            spawnEnemyBullet(x, y, angle + Math.PI, 118 + state.stage * 2.8, 15 + state.stage * 0.72, 5.5, e.color, { accel: 22, wave: 0.08, waveSpeed: 3.4, life: 6 });
+          }
+        }
+
+        function bossMineTide(e, rows = 3) {
+          addText(e.x, e.y + e.r + 20, "MARÉ DE MINAS", e.color, 12);
+          const spacing = Math.max(72, W / 11);
+          for (let row = 0; row < rows; row++) {
+            for (let x = spacing * 0.5; x < W; x += spacing) {
+              const offset = row % 2 ? spacing * 0.5 : 0;
+              spawnEnemyBullet((x + offset) % W, -30 - row * 72, Math.PI / 2, 58 + row * 16, 18 + state.stage * 0.72, 9, e.color, { wave: 0.32, waveSpeed: 2.2 + row * 0.35, homing: 0.08, homingTime: 5, life: 12 });
+            }
+          }
+        }
+
+        function bossMirrorFan(e, count = 9) {
+          addText(e.x, e.y + e.r + 18, "FOGO ESPELHADO", e.color, 12);
+          const base = angleTo(e, player);
+          for (const side of [-1, 1]) {
+            const originX = e.x + side * e.r * 0.78;
+            for (let i = 0; i < count; i++) {
+              const spread = (i - (count - 1) / 2) * 0.072;
+              spawnEnemyBullet(originX, e.y, base + spread * side, 275 + state.stage * 5.5, 13 + state.stage * 0.68, 4.8, side < 0 ? "#5de7ff" : "#ff5bd7", { wave: 0.06 * side, waveSpeed: 5.6, life: 6 });
+            }
+          }
+        }
+
+        function bossAnnihilationWall(e) {
+          addText(player.x, 80, "MURALHA DE ANIQUILAÇÃO", e.color, 12);
+          const gapCenter = clamp(player.x + rand(80, -80), 90, W - 90);
+          const gap = clamp(125 - state.stage * 0.7, 72, 125);
+          for (let x = 20; x < W - 20; x += 27) {
+            if (Math.abs(x - gapCenter) < gap / 2) continue;
+            spawnEnemyBullet(x, -16, Math.PI / 2, 235 + state.stage * 4, 17 + state.stage * 0.78, 5.5, e.color, { accel: 34, life: 6 });
+          }
+          for (const side of [-1, 1]) {
+            for (let y = 120; y < H - 60; y += 58) {
+              spawnEnemyBullet(side > 0 ? W + 12 : -12, y, side > 0 ? Math.PI : 0, 190 + state.stage * 3.2, 15 + state.stage * 0.7, 5, e.color, { wave: 0.1 * side, waveSpeed: 3.8, life: 7 });
+            }
+          }
+        }
+
+        function bossEclipseLances(e, count = 7) {
+          addText(player.x, player.y - 40, "LANÇAS DO HORIZONTE", e.color, 12);
+          const base = angleTo(e, player);
+          for (let i = 0; i < count; i++) {
+            const angle = base + (i - (count - 1) / 2) * 0.045;
+            spawnEnemyBullet(e.x, e.y, angle, 430 + state.stage * 7, 19 + state.stage * 0.82, 5.2, e.color, { accel: 95, life: 4.2 });
+          }
+          e.x = clamp(e.x + Math.cos(base) * 90, e.r, W - e.r);
+        }
+
+        function bossHydraVolley(e, heads = 5) {
+          addText(e.x, e.y + e.r + 22, "SALVA DA HIDRA", e.color, 12);
+          for (let head = 0; head < heads; head++) {
+            const originAngle = -Math.PI + (head * Math.PI) / Math.max(1, heads - 1);
+            const ox = e.x + Math.cos(originAngle) * e.r * 0.95;
+            const oy = e.y + Math.sin(originAngle) * e.r * 0.45;
+            const base = Math.atan2(player.y - oy, player.x - ox);
+            for (let i = -1; i <= 1; i++) {
+              spawnEnemyBullet(ox, oy, base + i * 0.13, 185 + state.stage * 4.5, 14 + state.stage * 0.72, 5, e.color, { homing: 0.72 + head * 0.05, homingTime: 2.6, life: 7 });
+            }
+          }
+        }
+
+        function bossEdgeCrossfire(e, lanes = 7) {
+          addText(W / 2, H * 0.3, "FOGO CRUZADO", e.color, 12);
+          for (let i = 0; i < lanes; i++) {
+            const y = H * (0.16 + (i / Math.max(1, lanes - 1)) * 0.68);
+            for (const side of [-1, 1]) {
+              const x = side < 0 ? -12 : W + 12;
+              const angle = Math.atan2(player.y - y, player.x - x);
+              spawnEnemyBullet(x, y, angle, 245 + state.stage * 4.2, 16 + state.stage * 0.75, 5.2, e.color, { wave: 0.08 * side, waveSpeed: 4.4, life: 7 });
+            }
+          }
+        }
+
         function attackBossPattern(e) {
           const rage = (e.rageLevel || 1) - 1;
           const pattern = e.patternIndex++;
           shock(e.x, e.y, e.color, e.r * 1.7, 0.22);
-          if (e.kind === 0) {
+          const profile = e.bossProfile ?? (e.kind % BOSS_PROFILES.length);
+          if (profile === 0) {
             const choice = pattern % 4;
             if (choice === 0) bossSpiral(e, false);
             else if (choice === 1) bossWall(e);
             else if (choice === 2) bossAimedBurst(e, 7 + rage * 2, 0.105, 1.08);
             else bossSpiral(e, true);
-          } else if (e.kind === 1) {
+          } else if (profile === 1) {
             const choice = pattern % 4;
             if (choice === 0) bossHomingVolley(e, 6 + rage * 2);
             else if (choice === 1) bossAimedBurst(e, 9 + rage * 2, 0.085, 1.28);
             else if (choice === 2) bossSpiral(e, pattern % 2 === 0);
             else bossHeavyOrb(e);
-          } else {
+          } else if (profile === 2) {
             const choice = pattern % 5;
             if (choice === 0) bossMeteorRain(e, 7 + rage * 3);
             else if (choice === 1) {
@@ -3230,9 +3352,44 @@
             else if (choice === 3) bossHeavyOrb(e);
             else bossAimedBurst(e, 11 + rage * 2, 0.075, 1.18);
           }
+          if (profile === 3) {
+            if (pattern % 3 === 0) bossTemporalCage(e, 18 + rage * 4);
+            else if (pattern % 3 === 1) bossEdgeCrossfire(e, 6 + rage);
+            else bossSpiral(e, pattern % 2 === 0);
+          } else if (profile === 4) {
+            if (pattern % 3 === 0) bossMineTide(e, 2 + rage);
+            else if (pattern % 3 === 1) bossHeavyOrb(e);
+            else bossWall(e);
+          } else if (profile === 5) {
+            if (pattern % 3 === 0) bossMirrorFan(e, 8 + rage * 2);
+            else if (pattern % 3 === 1) bossSpiral(e, pattern % 2 === 0);
+            else bossTemporalCage(e, 14 + rage * 3);
+          } else if (profile === 6) {
+            if (pattern % 3 === 0) bossAnnihilationWall(e);
+            else if (pattern % 3 === 1) bossMeteorRain(e, 10 + rage * 3);
+            else bossHeavyOrb(e);
+          } else if (profile === 7) {
+            if (pattern % 3 === 0) bossEclipseLances(e, 6 + rage * 2);
+            else if (pattern % 3 === 1) bossEdgeCrossfire(e, 7 + rage);
+            else bossHomingVolley(e, 8 + rage * 2);
+          } else if (profile === 8) {
+            if (pattern % 3 === 0) bossHydraVolley(e, 5 + rage * 2);
+            else if (pattern % 3 === 1) bossTemporalCage(e, 16 + rage * 3);
+            else bossMirrorFan(e, 7 + rage * 2);
+          } else if (profile === 9) {
+            const omega = pattern % 6;
+            if (omega === 0) bossAnnihilationWall(e);
+            else if (omega === 1) bossHydraVolley(e, 7 + rage);
+            else if (omega === 2) bossTemporalCage(e, 20 + rage * 4);
+            else if (omega === 3) bossMirrorFan(e, 10 + rage * 2);
+            else if (omega === 4) bossMineTide(e, 3 + rage);
+            else bossEclipseLances(e, 7 + rage * 2);
+          }
+          const profileData = bossProfile(e.kind);
           e.patternTimer = Math.max(
-            0.68,
-            (2.45 - state.stage * 0.012) / (1 + rage * 0.42),
+            0.52,
+            ((2.4 - state.stage * 0.011) * profileData.cadence) /
+              (1 + rage * 0.38),
           );
         }
 
@@ -3735,7 +3892,7 @@
               if (Number.isFinite(enemy._syncRot)) enemy.rot = lerpAngle(enemy.rot || 0, enemy._syncRot, blend);
               const rr = enemy.r + player.r * .75;
               if ((enemy.x - player.x) ** 2 + (enemy.y - player.y) ** 2 < rr * rr) {
-                damagePlayer((enemy.boss ? 35 : enemy.type === "tank" ? 24 : 13) + state.stage * .5);
+                damagePlayer((enemy.boss ? 35 : enemy.contactDamage || (enemy.family === "tank" ? 24 : 13)) + state.stage * .5);
               }
             }
             enemies = enemies.filter((enemy) => !enemy.dead);
@@ -3754,12 +3911,13 @@
             }
 
             const a = angleTo(e, player);
+            const d = Math.sqrt(dist2(e, player));
+            const family = e.family || e.type;
             let targetA = a;
             let speed = e.speed;
-            if (e.type === "zigzag")
+            if (family === "zigzag" || family === "splitter")
               targetA += Math.sin(e.t * 4 + e.phase) * 0.95;
-            if (e.type === "shooter") {
-              const d = Math.sqrt(dist2(e, player));
+            if (family === "shooter") {
               // Combina órbita com correção radial: longe ele se aproxima,
               // perto ele recua. Isso impede que fique orbitando fora da tela.
               const ux = Math.cos(a),
@@ -3773,21 +3931,11 @@
                 tx + ux * radial * 1.15,
               );
               speed *= d < 210 ? 0.72 : 1;
-              e.fire -= dt;
-              if (e.fire <= 0 && d < 620) {
-                fireEnemy(e);
-                e.fire = Math.max(0.55, 2.1 - state.stage * 0.025);
-              }
             }
-            if (e.type === "tank") {
+            if (family === "tank") {
               speed *= 0.8;
-              e.fire -= dt;
-              if (e.fire <= 0) {
-                fireEnemy(e, "spread");
-                e.fire = Math.max(1.2, 3.2 - state.stage * 0.03);
-              }
             }
-            if (e.type === "charger") {
+            if (family === "charger") {
               e.dash -= dt;
               if (e.dash < 0.38) {
                 speed *= 4.5;
@@ -3795,6 +3943,37 @@
               }
               if (e.dash <= 0) e.dash = rand(3.8, 2.2);
             }
+            if (family === "sniper") {
+              const orbit = Math.sign(Math.sin(e.phase)) || 1;
+              const radial = clamp((d - 430) / 130, -1.35, 1.35);
+              targetA = a + orbit * Math.PI / 2 - radial * orbit * 0.72;
+              speed *= d < 300 ? 1.35 : 0.88;
+            }
+            if (family === "minelayer") {
+              const orbit = Math.sign(Math.cos(e.phase)) || 1;
+              const radial = clamp((d - 340) / 150, -1.1, 1.1);
+              targetA = a + orbit * (Math.PI / 2 - radial * 0.7);
+              speed *= 0.84;
+            }
+            if (family === "leech") {
+              targetA = a + Math.sin(e.t * 5.5 + e.phase) * 0.28;
+              speed *= d < 120 ? 1.5 : 1.12;
+            }
+            if (family === "sentinel") {
+              const orbit = Math.sign(Math.sin(e.phase * 1.7)) || 1;
+              const radial = clamp((d - 370) / 165, -1.15, 1.15);
+              targetA = a + orbit * (Math.PI / 2 - radial * 0.82);
+              speed *= 0.68;
+            }
+            if ((e.variant || 0) === 1) speed *= 1.1;
+            if ((e.variant || 0) === 2) speed *= 0.9;
+            if ((e.variant || 0) === 3)
+              targetA += Math.sin(e.t * 6.8 + e.phase) * 0.52;
+            if ((e.variant || 0) === 4) {
+              targetA += Math.sin(e.t * 3.2 + e.phase) * 0.22;
+              speed *= 1.08;
+            }
+            if (e.age > 0.45) fireEnemyWeapon(e, d, dt);
 
             // Investida inicial: ao surgir, qualquer inimigo ignora órbitas e desvios
             // e persegue diretamente a posição atual do jogador.
@@ -3844,7 +4023,7 @@
 
             const rr = e.r + player.r * 0.75;
             if ((e.x - player.x) ** 2 + (e.y - player.y) ** 2 < rr * rr) {
-              damagePlayer((e.type === "tank" ? 24 : 13) + state.stage * 0.5);
+              damagePlayer((e.contactDamage || (e.family === "tank" ? 24 : 13)) + state.stage * 0.5);
               const knock = angleTo(player, e);
               e.x += Math.cos(knock) * 38;
               e.y += Math.sin(knock) * 38;
@@ -3861,7 +4040,9 @@
         }
 
         function updateBoss(e, dt) {
-          e.rot += dt * (0.5 + e.kind * 0.18);
+          const profile = e.bossProfile ?? (e.kind % BOSS_PROFILES.length);
+          const profileData = bossProfile(e.kind);
+          e.rot += dt * (0.48 + profile * 0.055);
           e.patternTimer -= dt;
           e.supplyTimer -= dt;
           e.fire -= dt;
@@ -3887,17 +4068,26 @@
           if (e.y < e.targetY) e.y += 90 * dt;
           else {
             const rage = 1 + (e.rageLevel - 1) * 0.22;
-            e.x = W / 2 + Math.sin(e.t * 0.54 * rage) * Math.min(W * 0.34, 320);
-            e.y = e.targetY + Math.sin(e.t * 0.9 * rage) * 35;
+            const horizontal = [0.34, 0.4, 0.24, 0.36, 0.29, 0.42, 0.2, 0.46, 0.37, 0.32][profile];
+            const vertical = [35, 52, 24, 48, 30, 58, 18, 64, 44, 38][profile];
+            e.x = W / 2 + Math.sin(e.t * (0.48 + profile * 0.045) * rage) * Math.min(W * horizontal, 390) * profileData.mobility;
+            e.y = e.targetY + Math.sin(e.t * (0.78 + profile * 0.07) * rage + profile) * vertical;
           }
           if (e.y >= e.targetY - 5) {
             // Disparo básico mantém pressão entre os padrões especiais.
             if (e.fire <= 0) {
-              if (e.kind === 0) fireEnemy(e, "aimed");
-              else if (e.kind === 1) fireEnemy(e, "spread");
-              else bossAimedBurst(e, 3, 0.1, 0.92);
+              if (profile === 0) fireEnemy(e, "aimed");
+              else if (profile === 1) fireEnemy(e, "spread");
+              else if (profile === 2) bossAimedBurst(e, 3, 0.1, 0.92);
+              else if (profile === 3) bossSpiral(e, e.patternIndex % 2 === 0);
+              else if (profile === 4) bossHeavyOrb(e);
+              else if (profile === 5) bossAimedBurst(e, 5, 0.065, 1.08);
+              else if (profile === 6) fireEnemy(e, "spread");
+              else if (profile === 7) bossAimedBurst(e, 3, 0.035, 1.55);
+              else if (profile === 8) bossHomingVolley(e, 4);
+              else bossAimedBurst(e, 7, 0.06, 1.3);
               e.fire =
-                Math.max(0.28, 0.82 - state.stage * 0.005) /
+                Math.max(0.22, (0.82 - state.stage * 0.005) * profileData.cadence) /
                 (1 + (e.rageLevel - 1) * 0.35);
             }
             if (e.patternTimer <= 0) attackBossPattern(e);
@@ -3906,7 +4096,7 @@
               dropBossCores(e, 2 + (e.hp / e.maxHp < 0.4 ? 1 : 0));
               e.supplyTimer = Math.max(4.1, 6.2 - state.stage * 0.018);
             }
-            if (e.kind === 1 && e.dash <= 0) {
+            if ((profile === 1 || profile === 7) && e.dash <= 0) {
               bossAimedBurst(e, 5, 0.055, 1.45);
               e.dash = Math.max(2.2, 3.7 - state.stage * 0.012);
             }
@@ -4212,6 +4402,30 @@
         }
 
         function draw() {
+          if (window.starforge3D?.ready) {
+            window.starforge3D.renderFrame({
+              width: W,
+              height: H,
+              time: visualWorldTime(),
+              gameTime: state.time,
+              state,
+              player: player && !state.spectating ? player : null,
+              remotePlayer: mp.active && mp.remotePlayer?.alive ? mp.remotePlayer : null,
+              enemies,
+              bullets,
+              enemyBullets,
+              pickups,
+              particles,
+              shockwaves,
+              texts,
+              biome: BIOMES[parallax.index],
+              biomeIndex: parallax.index,
+              worldSeed: mp.worldSeed || 7042026,
+              localName: mp.active ? mp.localName : getPilotName(),
+              remoteName: mp.remoteName,
+            });
+            return;
+          }
           drawBackground();
           ctx.save();
           if (state.shake > 0.2) {
@@ -4605,8 +4819,9 @@
             ctx.fillStyle = e.flash > 0 ? "#ffffff" : e.color;
             ctx.strokeStyle = "rgba(255,255,255,.6)";
             ctx.lineWidth = 1;
+            const family = e.family || e.type;
 
-            if (e.type === "scout" || e.type === "shard") {
+            if (family === "scout" || family === "shard") {
               ctx.beginPath();
               ctx.moveTo(0, -e.r);
               ctx.lineTo(e.r * 0.85, e.r * 0.75);
@@ -4614,13 +4829,13 @@
               ctx.lineTo(-e.r * 0.85, e.r * 0.75);
               ctx.closePath();
               ctx.fill();
-            } else if (e.type === "zigzag") {
+            } else if (family === "zigzag") {
               polygon(5, e.r, -Math.PI / 2);
               ctx.fill();
               ctx.fillStyle = "#1c1838";
               polygon(5, e.r * 0.48, -Math.PI / 2);
               ctx.fill();
-            } else if (e.type === "shooter") {
+            } else if (family === "shooter") {
               ctx.beginPath();
               ctx.arc(0, 0, e.r, 0, TAU);
               ctx.fill();
@@ -4633,7 +4848,7 @@
               ctx.moveTo(-e.r * 1.25, 0);
               ctx.lineTo(e.r * 1.25, 0);
               ctx.stroke();
-            } else if (e.type === "tank") {
+            } else if (family === "tank") {
               polygon(6, e.r, 0);
               ctx.fill();
               ctx.stroke();
@@ -4642,13 +4857,13 @@
               ctx.fill();
               ctx.fillStyle = e.color;
               ctx.fillRect(-3, -e.r * 1.1, 6, e.r * 0.75);
-            } else if (e.type === "splitter") {
+            } else if (family === "splitter") {
               polygon(4, e.r, Math.PI / 4);
               ctx.fill();
               ctx.fillStyle = "#102b22";
               polygon(4, e.r * 0.52, 0);
               ctx.fill();
-            } else if (e.type === "charger") {
+            } else if (family === "charger") {
               ctx.beginPath();
               ctx.moveTo(0, -e.r * 1.25);
               ctx.lineTo(e.r, e.r);
@@ -4658,6 +4873,32 @@
               ctx.fill();
               ctx.fillStyle = "#2c0d16";
               ctx.fillRect(-3, -e.r * 0.45, 6, e.r);
+            } else if (family === "sniper") {
+              polygon(3, e.r * 1.2, -Math.PI / 2);
+              ctx.fill();
+              ctx.fillStyle = "#081427";
+              ctx.fillRect(-2, -e.r * 1.6, 4, e.r * 1.8);
+            } else if (family === "minelayer") {
+              polygon(8, e.r, Math.PI / 8);
+              ctx.fill();
+              ctx.fillStyle = "#140c28";
+              polygon(8, e.r * 0.52, 0);
+              ctx.fill();
+            } else if (family === "leech") {
+              ctx.beginPath();
+              ctx.ellipse(0, 0, e.r * 0.72, e.r * 1.2, 0, 0, TAU);
+              ctx.fill();
+              ctx.fillStyle = "#270914";
+              ctx.beginPath();
+              ctx.arc(0, -e.r * 0.25, e.r * 0.35, 0, TAU);
+              ctx.fill();
+            } else {
+              polygon(6 + (e.variant || 0), e.r, e.rot);
+              ctx.fill();
+              ctx.fillStyle = "#0c1830";
+              ctx.beginPath();
+              ctx.arc(0, 0, e.r * 0.42, 0, TAU);
+              ctx.fill();
             }
             ctx.restore();
 
@@ -6005,7 +6246,7 @@
             player.y = mp.remotePlayer.y;
           }
           update(dt); mpSendState(dt); mpSendWorld(dt); draw();
-          if (mp.active && mp.remotePlayer && mp.remotePlayer.alive) {
+          if (!window.starforge3D?.ready && mp.active && mp.remotePlayer && mp.remotePlayer.alive) {
             ctx.save();
             if (state.shake > 0.2) ctx.translate(rand(state.shake, -state.shake), rand(state.shake, -state.shake));
             drawRemotePlayer();
