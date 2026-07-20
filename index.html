@@ -406,6 +406,9 @@
         color: #9fb2ca;
         margin: 8px 0 24px;
       }
+      .mobileOnly {
+        display: none;
+      }
       .cards {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -520,14 +523,78 @@
         opacity: 1;
         transform: translateX(-50%) translateY(0);
       }
-      @media (max-width: 760px) {
-        .cards {
-          grid-template-columns: 1fr;
-          max-height: 68vh;
-          overflow: auto;
+      @media (max-width: 760px), (pointer: coarse) and (max-height: 500px) {
+        #upgradeScreen {
+          align-items: flex-end;
+          padding: 0;
+          background: linear-gradient(to bottom, transparent 12%, rgba(1, 3, 10, 0.42) 48%, rgba(1, 3, 10, 0.9));
+          backdrop-filter: blur(2px);
         }
-        .card {
-          min-height: 150px;
+        #upgradeScreen .panel {
+          width: 100%;
+          padding: 14px 12px max(14px, env(safe-area-inset-bottom));
+          border-width: 1px 0 0;
+          border-radius: 22px 22px 0 0;
+          background: linear-gradient(180deg, rgba(8, 15, 36, 0.95), rgba(4, 7, 19, 0.98));
+        }
+        #upgradeScreen .eyebrow { display: none; }
+        #upgradeScreen .upgradeTitle {
+          font-size: 22px;
+          letter-spacing: -0.025em;
+        }
+        #upgradeScreen .upgradeSub {
+          margin: 3px 0 10px;
+          font-size: 11px;
+          line-height: 1.35;
+        }
+        #upgradeScreen .upgradeSub > span:first-child { display: none; }
+        #upgradeScreen .mobileOnly { display: inline; }
+        #upgradeScreen .cards {
+          display: flex;
+          gap: 10px;
+          max-height: none;
+          overflow-x: auto;
+          overflow-y: hidden;
+          padding: 1px 12vw 4px 0;
+          scroll-snap-type: x mandatory;
+          overscroll-behavior-x: contain;
+          scrollbar-width: none;
+          touch-action: pan-x;
+        }
+        #upgradeScreen .cards::-webkit-scrollbar { display: none; }
+        #upgradeScreen .card {
+          flex: 0 0 min(76vw, 300px);
+          min-height: 142px;
+          padding: 14px 15px;
+          border-radius: 16px;
+          scroll-snap-align: start;
+        }
+        #upgradeScreen .card:hover { transform: none; }
+        #upgradeScreen .card:active {
+          transform: scale(0.985);
+          border-color: rgba(118, 247, 255, 0.58);
+        }
+        #upgradeScreen .card .icon {
+          height: 30px;
+          font-size: 27px;
+        }
+        #upgradeScreen .card h3 {
+          margin: 7px 0 4px;
+          padding-right: 54px;
+          font-size: 17px;
+          line-height: 1.1;
+        }
+        #upgradeScreen .card p {
+          font-size: 12px;
+          line-height: 1.35;
+        }
+        #upgradeScreen .rarity {
+          top: 12px;
+          right: 12px;
+          max-width: 92px;
+          font-size: 8px;
+          line-height: 1.25;
+          text-align: right;
         }
         .controls {
           grid-template-columns: 1fr;
@@ -541,9 +608,6 @@
         }
         .value {
           font-size: 16px;
-        }
-        #upgradeScreen .panel {
-          padding: 20px;
         }
       }
 
@@ -822,13 +886,19 @@
       #specialBtn.cooling {
         opacity: 0.4;
       }
-      #mobileControls { display: none; }
+      #mobileControls {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 30;
+        pointer-events: none;
+      }
       #joystick {
         position: fixed;
-        left: max(22px, env(safe-area-inset-left));
-        bottom: max(28px, env(safe-area-inset-bottom));
-        width: 126px;
-        height: 126px;
+        left: max(16px, env(safe-area-inset-left));
+        bottom: max(18px, env(safe-area-inset-bottom));
+        width: 146px;
+        height: 146px;
         border-radius: 50%;
         pointer-events: auto;
         touch-action: none;
@@ -846,14 +916,19 @@
       #joystick:after { height: 1px; width: 82%; top: 50%; left: 9%; }
       #joystickKnob {
         position: absolute;
-        width: 54px;
-        height: 54px;
-        left: 35px;
-        top: 35px;
+        width: 60px;
+        height: 60px;
+        left: 43px;
+        top: 43px;
         border-radius: 50%;
         background: radial-gradient(circle at 35% 30%, #a8fbff, #557cff 55%, #25325b);
         box-shadow: 0 0 20px rgba(118,247,255,.45);
         pointer-events: none;
+        will-change: transform;
+      }
+      #joystick.active {
+        border-color: rgba(118,247,255,.58);
+        background: radial-gradient(circle, rgba(118,247,255,.2), rgba(4,9,25,.72) 62%);
       }
       #mobilePauseBtn {
         position: fixed;
@@ -917,7 +992,7 @@
         .toprow .cluster .chip:nth-child(2) { display: none; }
         .chip { min-width: 72px; padding: 7px 8px; }
         .bottomrow { align-items: flex-end; }
-        .bottomrow .barbox { margin-bottom: 140px; width: min(64vw, 290px); }
+        .bottomrow .barbox { margin-bottom: 160px; width: min(64vw, 290px); }
         #specialChip, .bottomrow > .chip:last-child { display: none; }
         #hud { padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)); }
         .barrow { grid-template-columns: 48px 1fr 38px; gap: 5px; }
@@ -1205,7 +1280,8 @@
         <div class="eyebrow">NÚCLEO EVOLUTIVO SINCRONIZADO</div>
         <h2 class="upgradeTitle">Escolha uma melhoria</h2>
         <p class="upgradeSub">
-          A nave se transforma visualmente à medida que seu poder aumenta.
+          <span>A nave se transforma visualmente à medida que seu poder aumenta.</span>
+          <span class="mobileOnly">Deslize para comparar e toque para escolher.</span>
         </p>
         <div id="cards" class="cards"></div>
       </div>
@@ -3643,6 +3719,8 @@
             const card = document.createElement("div");
             card.className = "card";
             card.tabIndex = 0;
+            card.setAttribute("role", "button");
+            card.setAttribute("aria-label", `${u.name}, nível ${level}. ${u.desc}`);
             card.innerHTML = `<span class="rarity">${bossReward ? "RECOMPENSA DE CHEFE" : "NÍVEL " + level}</span>
         <div class="icon">${u.icon}</div><h3>${u.name}</h3><p>${u.desc}</p>`;
             const pick = () => {
@@ -3782,25 +3860,28 @@
           const left = input.keys.has("ArrowLeft") || input.keys.has("KeyA");
           const right = input.keys.has("ArrowRight") || input.keys.has("KeyD");
           let ax = (right ? 1 : 0) - (left ? 1 : 0),
-            ay = (down ? 1 : 0) - (up ? 1 : 0);
+            ay = (down ? 1 : 0) - (up ? 1 : 0),
+            analogInput = false;
 
           if (input.joystickX || input.joystickY) {
             ax = input.joystickX;
             ay = input.joystickY;
+            analogInput = true;
           } else if (input.touchMove) {
             const dx = input.x - input.touchStartX,
               dy = input.y - input.touchStartY;
             const len = Math.hypot(dx, dy) || 1;
             ax = dx / Math.max(50, len);
             ay = dy / Math.max(50, len);
+            analogInput = true;
           }
 
           const len = Math.hypot(ax, ay) || 1;
-          if (ax || ay) {
+          if ((ax || ay) && (!analogInput || len > 1)) {
             ax /= len;
             ay /= len;
           }
-          const responsiveness = 1 - Math.pow(0.001, dt);
+          const responsiveness = 1 - Math.exp(-dt * (ax || ay ? 25 : 18));
           player.vx = lerp(player.vx, ax * player.speed, responsiveness);
           player.vy = lerp(player.vy, ay * player.speed, responsiveness);
           player.x = clamp(player.x + player.vx * dt, 24, W - 24);
@@ -5226,13 +5307,21 @@
           const rect = ui.joystick.getBoundingClientRect();
           const dx = e.clientX - (rect.left + rect.width / 2);
           const dy = e.clientY - (rect.top + rect.height / 2);
-          const max = 40;
+          const knobRadius = ui.joystickKnob.offsetWidth / 2;
+          const max = Math.max(1, rect.width / 2 - knobRadius - 4);
           const distance = Math.hypot(dx, dy);
           const scale = distance > max ? max / distance : 1;
           const x = dx * scale;
           const y = dy * scale;
-          input.joystickX = x / max;
-          input.joystickY = y / max;
+          const normalizedDistance = Math.min(1, distance / max);
+          const deadzone = 0.1;
+          const strength = normalizedDistance <= deadzone
+            ? 0
+            : Math.pow((normalizedDistance - deadzone) / (1 - deadzone), 0.82);
+          const directionX = distance ? dx / distance : 0;
+          const directionY = distance ? dy / distance : 0;
+          input.joystickX = directionX * strength;
+          input.joystickY = directionY * strength;
           ui.joystickKnob.style.transform = `translate(${x}px, ${y}px)`;
         }
         function releaseJoystick(e) {
@@ -5240,6 +5329,7 @@
           input.joystickPointer = null;
           input.joystickX = 0;
           input.joystickY = 0;
+          ui.joystick.classList.remove("active");
           ui.joystickKnob.style.transform = "translate(0px, 0px)";
         }
 
@@ -5304,6 +5394,7 @@
           e.stopPropagation();
           audio.init();
           input.joystickPointer = e.pointerId;
+          ui.joystick.classList.add("active");
           ui.joystick.setPointerCapture?.(e.pointerId);
           moveJoystick(e);
         });
