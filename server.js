@@ -882,8 +882,8 @@ function handleMessage(session, msg) {
           upgradeName: cleanLabel(msg.upgradeName),
           level: clampInteger(msg.level, 1, 9999),
           build: msg.build && typeof msg.build === "object" ? msg.build : {},
+          serverTime: Date.now(),
         },
-        session,
       );
       break;
     }

@@ -104,6 +104,13 @@
         gap: 10px;
         flex-wrap: wrap;
       }
+      .topRightStack {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 10px;
+      }
+      .topRightStack > .barbox { width: min(360px, 42vw); }
       .chip {
         min-width: 102px;
         padding: 9px 12px;
@@ -697,12 +704,7 @@
       .hangarPilot em { color: #8cffc2; font-style: normal; font-size: 10px; }
       #hostStartBtn:disabled { opacity: .42; cursor: not-allowed; transform: none; }
       #spectatorStatus {
-        position: fixed;
-        top: 74px;
-        left: 50%;
-        transform: translateX(-50%);
         display: none;
-        z-index: 46;
         padding: 9px 16px;
         border-radius: 999px;
         background: rgba(5,10,24,.9);
@@ -711,6 +713,7 @@
         font-size: 11px;
         font-weight: 900;
         letter-spacing: .12em;
+        text-align: center;
       }
       #spectatorStatus.on { display: block; }
       /* ===== Ranking ===== */
@@ -902,7 +905,6 @@
         .shipCard .spec { font-size: 10.5px; }
         .shipDots { margin-top: 8px; }
         .toprow .cluster .chip:nth-child(2) { display: none; }
-        .toprow > .barbox { position: absolute; top: 82px; right: 10px; width: 170px; }
         .chip { min-width: 72px; padding: 7px 8px; }
         .bottomrow { align-items: flex-end; }
         .bottomrow .barbox { margin-bottom: 140px; width: min(64vw, 290px); }
@@ -920,15 +922,24 @@
         }
       }
       /* ===== Multiplayer ===== */
+      #multiplayerStack {
+        position: fixed;
+        top: max(12px, env(safe-area-inset-top));
+        left: 50%;
+        transform: translateX(-50%);
+        width: min(360px, calc(100vw - 32px));
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 7px;
+        z-index: 50;
+        pointer-events: none;
+      }
       #onlineBtn {
         background: linear-gradient(135deg, #ff5bd7, #b46cff 55%, #5fdfff);
         box-shadow: 0 12px 30px rgba(180,108,255,.28), inset 0 1px rgba(255,255,255,.35);
       }
       #mpStatus {
-        position: fixed;
-        top: max(12px, env(safe-area-inset-top));
-        left: 50%;
-        transform: translateX(-50%);
         padding: 6px 18px;
         border-radius: 20px;
         background: rgba(6,12,28,.84);
@@ -938,7 +949,6 @@
         letter-spacing: .1em;
         color: var(--cyan);
         display: none;
-        z-index: 50;
         pointer-events: none;
         text-transform: uppercase;
       }
@@ -947,17 +957,13 @@
       #mpStatus.waiting { animation: mpPulse 1.6s ease-in-out infinite alternate; }
       @keyframes mpPulse { to { opacity: .5; } }
       #matchPlayers {
-        position: fixed;
-        top: max(48px, calc(env(safe-area-inset-top) + 42px));
-        left: 50%;
-        transform: translateX(-50%);
-        min-width: 220px;
+        min-width: min(280px, 100%);
+        max-width: 100%;
         padding: 8px 10px;
         border-radius: 14px;
         background: rgba(6,12,28,.82);
         border: 1px solid rgba(118,247,255,.18);
         display: none;
-        z-index: 45;
         pointer-events: none;
       }
       #matchPlayers.on { display: block; }
@@ -1018,16 +1024,13 @@
       .lobbyInfo .lobbyDot:nth-child(3) { animation-delay: .4s; }
       @keyframes lobbyBlink { 0%, 100% { opacity: .2; } 50% { opacity: 1; } }
       #remoteHpWrap {
-        position: fixed;
-        top: max(12px, env(safe-area-inset-top));
-        right: max(16px, env(safe-area-inset-right));
-        min-width: 140px;
+        width: min(240px, 100%);
+        min-width: 180px;
         padding: 8px 12px;
         border-radius: 12px;
         background: rgba(6,12,28,.78);
         border: 1px solid rgba(255,91,215,.25);
         display: none;
-        z-index: 40;
         pointer-events: none;
       }
       #remoteHpWrap.on { display: block; }
@@ -1035,6 +1038,27 @@
       #remoteHpFill {
         background: linear-gradient(90deg, #ff5bd7, #b46cff);
         box-shadow: 0 0 12px rgba(255,91,215,.45);
+      }
+      @media (max-width: 1100px) {
+        #multiplayerStack {
+          top: max(148px, calc(env(safe-area-inset-top) + 136px));
+        }
+      }
+      @media (max-width: 760px) {
+        .toprow > .topRightStack {
+          position: absolute;
+          top: 82px;
+          right: 10px;
+          width: 170px;
+        }
+        .topRightStack > .barbox { width: 100%; }
+        #remoteHpWrap { width: 170px; min-width: 0; }
+        #multiplayerStack {
+          top: max(226px, calc(env(safe-area-inset-top) + 214px));
+          width: calc(100vw - 20px);
+        }
+        #matchPlayers { min-width: min(280px, 100%); }
+        #spectatorStatus { font-size: 9px; padding: 8px 12px; }
       }
     </style>
   </head>
@@ -1063,23 +1087,33 @@
             <div id="livesText" class="value livesValue">♥ ♥ ♥</div>
           </div>
         </div>
-        <div class="chip barbox">
-          <div id="stageWrap">
-            <div class="label">Progresso da onda</div>
-            <div class="barrow">
-              <span class="mini">SETOR</span>
-              <div class="bar"><div id="stageFill" class="fill"></div></div>
-              <span id="stageCount" class="mini">0/0</span>
+        <div class="topRightStack">
+          <div class="chip barbox">
+            <div id="stageWrap">
+              <div class="label">Progresso da onda</div>
+              <div class="barrow">
+                <span class="mini">SETOR</span>
+                <div class="bar"><div id="stageFill" class="fill"></div></div>
+                <span id="stageCount" class="mini">0/0</span>
+              </div>
+            </div>
+            <div id="bossWrap">
+              <div class="label">Assinatura colossal detectada</div>
+              <div class="barrow">
+                <span class="mini">CHEFE</span>
+                <div class="bar"><div id="bossFill" class="fill"></div></div>
+                <span id="bossPct" class="mini">100%</span>
+              </div>
+              <div id="ragePips" class="ragePips"><i></i><i></i><i></i></div>
             </div>
           </div>
-          <div id="bossWrap">
-            <div class="label">Assinatura colossal detectada</div>
-            <div class="barrow">
-              <span class="mini">CHEFE</span>
-              <div class="bar"><div id="bossFill" class="fill"></div></div>
-              <span id="bossPct" class="mini">100%</span>
+          <div id="remoteHpWrap">
+            <div id="remoteHpName" class="label">ALIADO</div>
+            <div class="barrow" style="margin-top:4px">
+              <span class="mini">CASCO</span>
+              <div class="bar"><div id="remoteHpFill" class="fill"></div></div>
+              <span id="remoteHpText" class="mini">100</span>
             </div>
-            <div id="ragePips" class="ragePips"><i></i><i></i><i></i></div>
           </div>
         </div>
       </div>
@@ -1272,16 +1306,10 @@
       </div>
     </div>
 
-    <div id="mpStatus"></div>
-    <div id="spectatorStatus">MODO ESPECTADOR · ACOMPANHANDO ALIADO</div>
-    <div id="matchPlayers"></div>
-    <div id="remoteHpWrap">
-      <div id="remoteHpName" class="label">ALIADO</div>
-      <div class="barrow" style="margin-top:4px">
-        <span class="mini">CASCO</span>
-        <div class="bar"><div id="remoteHpFill" class="fill"></div></div>
-        <span id="remoteHpText" class="mini">100</span>
-      </div>
+    <div id="multiplayerStack">
+      <div id="mpStatus"></div>
+      <div id="matchPlayers"></div>
+      <div id="spectatorStatus">MODO ESPECTADOR · ACOMPANHANDO ALIADO</div>
     </div>
 
     <script>
@@ -2478,6 +2506,30 @@
           shockwaves.push({ x, y, r: 4, max, life, maxLife: life, color });
         }
 
+        function triggerShipUpgrade(entity, info = {}) {
+          if (!entity) return;
+          const color = entity.ship?.color || info.color || "#76f7ff";
+          entity.upgradeFx = {
+            life: 2.25,
+            maxLife: 2.25,
+            name: String(info.upgradeName || "MELHORIA").slice(0, 28),
+            level: Math.max(1, Number(info.level) || 1),
+            playerName: String(info.playerName || "PILOTO").slice(0, 14),
+            color,
+          };
+          shock(entity.x, entity.y, color, 190, 0.72);
+          shock(entity.x, entity.y, "#ffffff", 92, 0.42);
+          burst(entity.x, entity.y, color, 38, 300, 4.5, 0.95);
+          burst(entity.x, entity.y, "#ffffff", 14, 210, 2.8, 0.58);
+        }
+
+        function upgradeShipScale(entity) {
+          const fx = entity?.upgradeFx;
+          if (!fx || fx.life <= 0) return 1;
+          const progress = 1 - fx.life / fx.maxLife;
+          return 1 + Math.sin(progress * Math.PI * 7) * (1 - progress) * 0.075;
+        }
+
         function spawnEnemy(forceType = null, x = null, y = null, scale = 1) {
           const s = state.stage;
           const pool = ["scout", "scout", "zigzag"];
@@ -3461,11 +3513,13 @@
               state.choosing = false;
               ui.upgrades.classList.remove("show");
               audio.upgrade();
-              showToast(mp.active
-                ? `${mp.localName} melhorou: ${u.name} Nv.${upgradeLevels[u.id]}`
-                : u.name);
-              shock(player.x, player.y, "#76f7ff", 150, 0.55);
-              burst(player.x, player.y, "#b46cff", 32, 260, 4, 0.8);
+              if (!mp.active) {
+                triggerShipUpgrade(player, {
+                  playerName: getPilotName(),
+                  upgradeName: u.name,
+                  level: upgradeLevels[u.id],
+                });
+              }
               updateUI();
               if (completesBossPassage) {
                 if (mp.active && mp.connected) {
@@ -4089,6 +4143,12 @@
             s.life -= dt;
             s.r = lerp(s.r, s.max, 1 - Math.pow(0.005, dt));
           }
+          for (const entity of [player, mp.remotePlayer]) {
+            if (entity?.upgradeFx) {
+              entity.upgradeFx.life -= dt;
+              if (entity.upgradeFx.life <= 0) entity.upgradeFx = null;
+            }
+          }
           particles = particles.filter((p) => p.life > 0);
           texts = texts.filter((t) => t.life > 0);
           shockwaves = shockwaves.filter((s) => s.life > 0);
@@ -4323,10 +4383,88 @@
           ctx.shadowBlur = 0;
         }
 
+        function drawShipUpgradeEffect(entity) {
+          const fx = entity?.upgradeFx;
+          if (!fx || fx.life <= 0) return;
+          const progress = 1 - fx.life / fx.maxLife;
+          const fadeIn = clamp(progress / 0.08, 0, 1);
+          const fadeOut = clamp(fx.life / 0.42, 0, 1);
+          const alpha = fadeIn * fadeOut;
+          const color = fx.color || "#76f7ff";
+
+          ctx.save();
+          ctx.globalCompositeOperation = "lighter";
+          ctx.strokeStyle = color;
+          ctx.shadowBlur = 22;
+          ctx.shadowColor = color;
+          for (let i = 0; i < 3; i++) {
+            const localProgress = (progress + i * 0.2) % 1;
+            ctx.globalAlpha = alpha * (1 - localProgress) * 0.72;
+            ctx.lineWidth = 3 - i * 0.55;
+            ctx.beginPath();
+            ctx.arc(entity.x, entity.y, 28 + localProgress * 74, 0, TAU);
+            ctx.stroke();
+          }
+          ctx.globalAlpha = alpha * 0.85;
+          for (let i = 0; i < 6; i++) {
+            const angle = progress * TAU * 1.8 + (i * TAU) / 6;
+            const radius = 39 + Math.sin(progress * Math.PI) * 17;
+            const x = entity.x + Math.cos(angle) * radius;
+            const y = entity.y + Math.sin(angle) * radius;
+            ctx.fillStyle = i % 2 ? "#ffffff" : color;
+            ctx.fillRect(x - 2, y - 2, 4, 4);
+          }
+          ctx.restore();
+
+          const title = `UPGRADE · ${fx.name}`;
+          const detail = `${fx.playerName} · NV.${fx.level}`;
+          ctx.save();
+          ctx.font = "900 11px system-ui";
+          const width = Math.min(292, Math.max(172, ctx.measureText(title).width + 30));
+          const placeAbove = entity.y > 155;
+          const rise = Math.sin(Math.min(1, progress / 0.45) * Math.PI * 0.5) * 12;
+          const boxX = clamp(entity.x, width / 2 + 12, W - width / 2 - 12);
+          const boxY = clamp(
+            placeAbove ? entity.y - 82 - rise : entity.y + 82 + rise,
+            35,
+            H - 35,
+          );
+          const connectorY = placeAbove ? boxY + 25 : boxY - 25;
+          ctx.globalAlpha = alpha;
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.5;
+          ctx.shadowBlur = 12;
+          ctx.shadowColor = color;
+          ctx.beginPath();
+          ctx.moveTo(entity.x, entity.y + (placeAbove ? -31 : 31));
+          ctx.lineTo(boxX, connectorY);
+          ctx.stroke();
+
+          ctx.fillStyle = "rgba(4, 9, 24, .92)";
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.roundRect(boxX - width / 2, boxY - 25, width, 50, 12);
+          ctx.fill();
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillStyle = "#f4fbff";
+          ctx.font = "900 11px system-ui";
+          ctx.fillText(title, boxX, boxY - 7, width - 20);
+          ctx.fillStyle = color;
+          ctx.font = "800 9px system-ui";
+          ctx.fillText(detail, boxX, boxY + 10, width - 20);
+          ctx.restore();
+        }
+
         function drawPlayer() {
           const p = player;
           ctx.save();
           ctx.translate(p.x, p.y);
+          const upgradeScale = upgradeShipScale(p);
+          ctx.scale(upgradeScale, upgradeScale);
           ctx.rotate(p.angle + Math.PI / 2);
           if (p.invuln > 0 && Math.floor(p.invuln * 18) % 2 === 0)
             ctx.globalAlpha = 0.45;
@@ -4429,6 +4567,7 @@
             ctx.restore();
           }
           drawPilotLabel(p.x, p.y - 36, mp.active ? mp.localName : (ui.playerName.value || "PILOTO"), p.ship.color);
+          drawShipUpgradeEffect(p);
 
           for (let i = 0; i < player.drones; i++) {
             const d = dronePosition(i);
@@ -5385,13 +5524,16 @@
                 break;
               }
               case "player:upgrade": {
-                if (msg.playerId !== mp.playerId && mp.remotePlayer) {
+                const isLocalUpgrade = msg.playerId === mp.playerId;
+                if (!isLocalUpgrade && mp.remotePlayer) {
                   const build = msg.build || {};
                   for (const key of ["drones", "weaponTier", "engineTier", "armorTier", "size", "maxHp", "maxShield"]) {
                     if (Number.isFinite(Number(build[key]))) mp.remotePlayer[key] = Number(build[key]);
                   }
                 }
-                showToast(`${msg.playerName || "PILOTO"} melhorou: ${msg.upgradeName || "MELHORIA"} Nv.${msg.level || 1}`);
+                const upgradedShip = isLocalUpgrade ? player : mp.remotePlayer;
+                triggerShipUpgrade(upgradedShip, msg);
+                if (!isLocalUpgrade) audio.tone(520, 0.16, "sine", 0.035, 260);
                 break;
               }
               case "enemy:spawn": {
@@ -5815,7 +5957,8 @@
           const r = mp.remotePlayer, ship = r.ship || SHIPS[0];
           ctx.save();
           ctx.translate(r.x, r.y);
-          ctx.scale(r.size || 1, r.size || 1);
+          const shipScale = (r.size || 1) * upgradeShipScale(r);
+          ctx.scale(shipScale, shipScale);
           ctx.rotate(r.angle + Math.PI / 2);
           ctx.globalAlpha = (r.invuln > 0 && Math.floor(r.invuln * 18) % 2 === 0) ? 0.35 : 0.85;
           const eg = ctx.createRadialGradient(0, 20, 0, 0, 20, 34);
@@ -5848,6 +5991,7 @@
             ctx.closePath(); ctx.fill(); ctx.restore();
           }
           drawPilotLabel(r.x, r.y - 36, r.name || mp.remoteName, "#ff5bd7");
+          drawShipUpgradeEffect(r);
         }
 
         const _baseLoop = loop;
