@@ -3879,8 +3879,8 @@
             const dx = input.x - input.touchStartX,
               dy = input.y - input.touchStartY;
             const len = Math.hypot(dx, dy) || 1;
-            ax = dx / Math.max(50, len);
-            ay = dy / Math.max(50, len);
+            ax = dx / Math.max(28, len);
+            ay = dy / Math.max(28, len);
             analogInput = true;
           }
 
@@ -3889,7 +3889,10 @@
             ax /= len;
             ay /= len;
           }
-          const responsiveness = 1 - Math.exp(-dt * (ax || ay ? 25 : 18));
+          const touchControlActive = input.joystickPointer !== null || input.touchMove;
+          const responsiveness = touchControlActive
+            ? 1
+            : 1 - Math.exp(-dt * (ax || ay ? 55 : 45));
           player.vx = lerp(player.vx, ax * player.speed, responsiveness);
           player.vy = lerp(player.vy, ay * player.speed, responsiveness);
           player.x = clamp(player.x + player.vx * dt, 24, W - 24);
@@ -5337,6 +5340,8 @@
           input.joystickPointer = null;
           input.joystickX = 0;
           input.joystickY = 0;
+          player.vx = 0;
+          player.vy = 0;
           ui.joystick.classList.remove("active");
           ui.joystickKnob.style.transform = "translate(0px, 0px)";
         }
@@ -5391,11 +5396,17 @@
         canvas.addEventListener("pointerup", (e) => {
           input.pointerDown = false;
           input.touchMove = false;
+          if (e.pointerType === "touch") {
+            player.vx = 0;
+            player.vy = 0;
+          }
           canvas.releasePointerCapture?.(e.pointerId);
         });
         canvas.addEventListener("pointercancel", () => {
           input.pointerDown = false;
           input.touchMove = false;
+          player.vx = 0;
+          player.vy = 0;
         });
         ui.joystick.addEventListener("pointerdown", (e) => {
           e.preventDefault();
